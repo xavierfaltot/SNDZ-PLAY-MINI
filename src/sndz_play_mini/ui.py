@@ -26,6 +26,7 @@ from .bpm import (
     SonoTrack,
     analyze_folder,
     find_tool,
+    smart_eq_filters,
 )
 
 APP_NAME = "SNDZ PLAY MINI"
@@ -348,7 +349,7 @@ class SonoWindow(QMainWindow):
         self._play_current(fade_in=False)
 
     def _playback_tool(self) -> str | None:
-        return find_tool("afplay") or find_tool("ffplay")
+        return find_tool("ffplay") or find_tool("afplay")
 
     def _play_current(self, fade_in: bool) -> None:
         if self.play_index >= len(self.tracks):
@@ -424,7 +425,7 @@ class SonoWindow(QMainWindow):
             return [str(track.path)]
 
         args = ["-nodisp", "-autoexit", "-loglevel", "quiet"]
-        filters: list[str] = []
+        filters = smart_eq_filters(track)
         if fade_in:
             filters.append(f"afade=t=in:st=0:d={mix_seconds:g}")
         if fade_out and track.duration_seconds:

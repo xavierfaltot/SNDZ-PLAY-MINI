@@ -25,6 +25,8 @@ OUTRO_ANALYSIS_SECONDS = 32
 MIX_SECONDS = 8.0
 MAX_MIX_SECONDS = 28.0
 MIN_MIX_DURATION_SECONDS = 24.0
+EQ_LOW_CUT_HZ = 35
+EQ_HIGH_CUT_HZ = 18000
 SUPPORTED_AUDIO_EXTENSIONS = {
     ".aac",
     ".aif",
@@ -253,6 +255,27 @@ def mixable_outro_seconds(path: Path, duration_seconds: float | None) -> float:
     except SonoError:
         return 0.0
     return mixable_region_seconds_from_energies(energy_envelope(pcm), from_start=False)
+
+
+def smart_eq_gains(track: SonoTrack) -> tuple[float, float]:
+    if track.bpm is None:
+        return 0.0, 0.0
+    if track.bpm >= 132.0:
+        return -1.5, 0.8
+    if track.bpm <= 92.0:
+        return 0.8, -0.4
+    return 0.0, 0.0
+
+
+def smart_eq_filters(track: SonoTrack) -> list[str]:
+    bass_gain, presence_gain = smart_eq_gains(track)
+    return [
+        f"highpass=f={EQ_LOW_CUT_HZ}",
+        f"lowpass=f={EQ_HIGH_CUT_HZ}",
+        f"equalizer=f=100:t=q:w=1:g={bass_gain:g}",
+        f"equalizer=f=2800:t=q:w=1:g={presence_gain:g}",
+        "acompressor=threshold=-18dB:ratio=1.8:attack=15:release=250:makeup=1",
+    ]
 
 
 def sort_tracks_by_bpm(tracks: list[SonoTrack]) -> list[SonoTrack]:

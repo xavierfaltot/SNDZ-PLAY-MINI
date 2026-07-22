@@ -11,6 +11,8 @@ from sndz_play_mini.bpm import (
     find_tool,
     is_mixable_intro_from_energies,
     mixable_region_seconds_from_energies,
+    smart_eq_filters,
+    smart_eq_gains,
     sort_tracks_by_bpm,
 )
 from sndz_play_mini.ui import PANEL_HEIGHT, PANEL_WIDTH, SonoWindow
@@ -59,6 +61,21 @@ def test_mixable_intro_energy_gate() -> None:
 def test_measures_long_mixable_regions() -> None:
     assert mixable_region_seconds_from_energies([0.3] * 700) >= 28.0
     assert mixable_region_seconds_from_energies([0.0] * 700) == 0.0
+
+
+def test_smart_eq_gains_follow_energy_curve(tmp_path) -> None:
+    assert smart_eq_gains(SonoTrack(tmp_path / "slow.mp3", 88.0)) == (0.8, -0.4)
+    assert smart_eq_gains(SonoTrack(tmp_path / "fast.mp3", 138.0)) == (-1.5, 0.8)
+    assert smart_eq_gains(SonoTrack(tmp_path / "mid.mp3", 118.0)) == (0.0, 0.0)
+
+
+def test_smart_eq_filters_are_playback_only(tmp_path) -> None:
+    filters = smart_eq_filters(SonoTrack(tmp_path / "fast.mp3", 138.0))
+
+    assert "highpass=f=35" in filters
+    assert "lowpass=f=18000" in filters
+    assert "equalizer=f=100:t=q:w=1:g=-1.5" in filters
+    assert any(filter_spec.startswith("acompressor=") for filter_spec in filters)
 
 
 def test_tool_lookup_returns_none_for_missing_tool() -> None:
@@ -123,6 +140,42 @@ def test_status_progress_uses_title_bar(monkeypatch) -> None:
     assert window.windowTitle() == "SNDZ PLAY MINI - BPM 42%"
     window._set_status("READY")
     assert window.windowTitle() == "SNDZ PLAY MINI"
+
+    window.close()
+    assert app is not None
+
+
+def test_playback_prefers_ffplay_for_eq(monkeypatch) -> None:
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    app = QApplication.instance() or QApplication(sys.argv)
+    window = SonoWindow()
+
+    monkeypatch.setattr(
+        "sndz_play_mini.ui.find_tool",
+        lambda name: f"/usr/bin/{name}" if name in {"ffplay", "afplay"} else None,
+    )
+
+    assert window._playback_tool() == "/usr/bin/ffplay"
+
+    window.close()
+    assert app is not None
+
+
+def test_ffplay_args_include_smart_eq_and_fades(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    app = QApplication.instance() or QApplication(sys.argv)
+    window = SonoWindow()
+    window.player_tool = "ffplay"
+    track = SonoTrack(tmp_path / "fast.mp3", 138.0, duration_seconds=180.0)
+
+    args = window._player_args(track, fade_in=True, fade_out=True, mix_seconds=8.0)
+    filters = args[args.index("-af") + 1]
+
+    assert "highpass=f=35" in filters
+    assert "lowpass=f=18000" in filters
+    assert "equalizer=f=100:t=q:w=1:g=-1.5" in filters
+    assert "afade=t=in:st=0:d=8" in filters
+    assert "afade=t=out:st=172.000:d=8" in filters
 
     window.close()
     assert app is not None

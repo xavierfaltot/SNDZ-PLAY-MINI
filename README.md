@@ -11,11 +11,12 @@ The app stays intentionally small:
 - sorted queue
 - icon controls for play and next
 - adaptive crossfade
+- smart playback EQ when `ffplay` is available
 - current track title only
 
-Mixes stay short by default, then get longer when the current outro and next intro have usable music beds and the BPMs are close.
+Mixes stay short by default, then get longer when the current outro and next intro have usable music beds and the BPMs are close. A small local mix-assist layer applies playback-only EQ: sub-bass cleanup, high cut, gentle compression, and BPM-aware low/presence gains. It does not write analysis files or modify the source sounds.
 
-It does not tag, rewrite, normalize, beatmatch, or alter source files.
+It does not tag, rewrite, beatmatch, or alter source files.
 
 ## Requirements
 
@@ -25,7 +26,7 @@ ffmpeg
 ffprobe
 ```
 
-macOS uses `afplay` for playback by default. `ffplay` is used as fallback when available.
+`ffplay` is preferred for playback because it supports the EQ/filter chain. macOS `afplay` is used as fallback when `ffplay` is unavailable.
 
 ## Run
 

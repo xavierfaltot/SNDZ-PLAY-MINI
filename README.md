@@ -11,10 +11,10 @@ The app stays intentionally small:
 - sorted queue
 - icon controls for play and next
 - adaptive crossfade
-- smart playback EQ when `ffplay` is available
+- smart playback EQ and loudness matching when `ffplay` is available
 - current track title only
 
-Mixes stay short by default, then get longer when the current outro and next intro have usable music beds and the BPMs are close. A small local mix-assist layer applies playback-only EQ: sub-bass cleanup, high cut, gentle compression, and BPM-aware low/presence gains. It does not write analysis files or modify the source sounds.
+Mixes stay short by default, then get longer when the current outro and next intro have usable music beds and the BPMs are close. A small local mix-assist layer applies playback-only EQ and loudness matching: sub-bass cleanup, high cut, gentle compression, BPM-aware low/presence gains, and `loudnorm` so tracks come out at a more consistent perceived volume. It does not write analysis files or modify the source sounds.
 
 It does not tag, rewrite, beatmatch, or alter source files.
 

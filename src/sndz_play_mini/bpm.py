@@ -27,6 +27,9 @@ MAX_MIX_SECONDS = 28.0
 MIN_MIX_DURATION_SECONDS = 24.0
 EQ_LOW_CUT_HZ = 35
 EQ_HIGH_CUT_HZ = 18000
+LOUDNESS_TARGET_LUFS = -16
+LOUDNESS_TRUE_PEAK_DB = -1.5
+LOUDNESS_RANGE_LU = 9
 SUPPORTED_AUDIO_EXTENSIONS = {
     ".aac",
     ".aif",
@@ -275,6 +278,12 @@ def smart_eq_filters(track: SonoTrack) -> list[str]:
         f"equalizer=f=100:t=q:w=1:g={bass_gain:g}",
         f"equalizer=f=2800:t=q:w=1:g={presence_gain:g}",
         "acompressor=threshold=-18dB:ratio=1.8:attack=15:release=250:makeup=1",
+        (
+            "loudnorm="
+            f"I={LOUDNESS_TARGET_LUFS}:"
+            f"TP={LOUDNESS_TRUE_PEAK_DB}:"
+            f"LRA={LOUDNESS_RANGE_LU}"
+        ),
     ]
 
 

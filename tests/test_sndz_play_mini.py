@@ -76,6 +76,7 @@ def test_smart_eq_filters_are_playback_only(tmp_path) -> None:
     assert "lowpass=f=18000" in filters
     assert "equalizer=f=100:t=q:w=1:g=-1.5" in filters
     assert any(filter_spec.startswith("acompressor=") for filter_spec in filters)
+    assert "loudnorm=I=-16:TP=-1.5:LRA=9" in filters
 
 
 def test_tool_lookup_returns_none_for_missing_tool() -> None:
@@ -174,6 +175,7 @@ def test_ffplay_args_include_smart_eq_and_fades(monkeypatch, tmp_path) -> None:
     assert "highpass=f=35" in filters
     assert "lowpass=f=18000" in filters
     assert "equalizer=f=100:t=q:w=1:g=-1.5" in filters
+    assert "loudnorm=I=-16:TP=-1.5:LRA=9" in filters
     assert "afade=t=in:st=0:d=8" in filters
     assert "afade=t=out:st=172.000:d=8" in filters
 

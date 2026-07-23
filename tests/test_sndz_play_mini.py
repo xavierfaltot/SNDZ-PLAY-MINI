@@ -6,7 +6,6 @@ from PySide6.QtWidgets import QApplication, QLineEdit, QListWidget
 
 from sndz_play_mini.bpm import (
     SonoTrack,
-    CUT_OVERLAP_SECONDS,
     analyze_folder,
     analyze_track,
     find_audio_files,
@@ -14,6 +13,7 @@ from sndz_play_mini.bpm import (
     first_beat_seconds_from_energies,
     is_mixable_intro_from_energies,
     mixable_region_seconds_from_energies,
+    NO_TRANSITION_SECONDS,
     normalize_bpm_to_range,
     smart_eq_filters,
     smart_eq_gains,
@@ -412,13 +412,13 @@ def test_uses_long_mix_for_similar_bpm_and_long_regions(monkeypatch, tmp_path) -
         mixable_intro_seconds=4.0,
         mixable_outro_seconds=28.0,
     )
-    assert window._transition_mix_seconds(window.tracks[0]) == CUT_OVERLAP_SECONDS
+    assert window._transition_mix_seconds(window.tracks[0]) == NO_TRANSITION_SECONDS
 
     window.close()
     assert app is not None
 
 
-def test_transition_uses_cut_overlap_when_long_mix_is_not_possible(monkeypatch, tmp_path) -> None:
+def test_transition_is_zero_when_long_mix_is_not_possible(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
     app = QApplication.instance() or QApplication(sys.argv)
     window = SonoWindow()
@@ -427,7 +427,7 @@ def test_transition_uses_cut_overlap_when_long_mix_is_not_possible(monkeypatch, 
         SonoTrack(tmp_path / "two.mp3", 122.0, duration_seconds=180.0, mixable_intro_seconds=0.0),
     ]
 
-    assert window._transition_mix_seconds(window.tracks[0]) == CUT_OVERLAP_SECONDS
+    assert window._transition_mix_seconds(window.tracks[0]) == NO_TRANSITION_SECONDS
 
     window.close()
     assert app is not None

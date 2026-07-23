@@ -28,7 +28,7 @@ The app stays intentionally small:
 - smart playback EQ and loudness matching when `ffplay` is available
 - current track title only
 
-Mixes stay short by default, then get longer when the current outro and next intro have usable music beds and the BPMs are close. If a long transition is not possible, the player uses a tight cut/mini-overlap instead of leaving silence. A small local mix-assist layer applies playback-only EQ and loudness matching: sub-bass cleanup, high cut, gentle compression, BPM-aware low/presence gains, and `loudnorm` so tracks come out at a more consistent perceived volume. It does not write analysis files or modify the source sounds.
+Mixes stay short by default, then get longer when the current outro and next intro have usable music beds and the BPMs are close. If a long transition is not possible, the player uses zero transition: it lets the current track finish and starts the next one cleanly. A small local mix-assist layer applies playback-only EQ and loudness matching: sub-bass cleanup, high cut, gentle compression, BPM-aware low/presence gains, and `loudnorm` so tracks come out at a more consistent perceived volume. It does not write analysis files or modify the source sounds.
 
 It does not tag, rewrite, beatmatch, or alter source files.
 

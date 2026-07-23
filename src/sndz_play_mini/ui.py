@@ -19,10 +19,10 @@ from PySide6.QtWidgets import (
 )
 
 from .bpm import (
-    CUT_OVERLAP_SECONDS,
     MAX_MIX_SECONDS,
     MIN_MIX_DURATION_SECONDS,
     MIX_SECONDS,
+    NO_TRANSITION_SECONDS,
     SonoError,
     SonoTrack,
     SUPPORTED_AUDIO_EXTENSIONS,
@@ -515,14 +515,14 @@ class SonoWindow(QMainWindow):
         if not track.duration_seconds:
             return 0.0
         if track.duration_seconds < MIN_MIX_DURATION_SECONDS:
-            return CUT_OVERLAP_SECONDS
+            return NO_TRANSITION_SECONDS
         if next_track.mixable_intro_seconds < MIX_SECONDS:
-            return CUT_OVERLAP_SECONDS
+            return NO_TRANSITION_SECONDS
 
         outro_seconds = track.mixable_outro_seconds if track.mixable_outro_seconds >= MIX_SECONDS else MIX_SECONDS
         available_seconds = min(outro_seconds, next_track.mixable_intro_seconds, MAX_MIX_SECONDS)
         if available_seconds < MIX_SECONDS:
-            return CUT_OVERLAP_SECONDS
+            return NO_TRANSITION_SECONDS
 
         if track.bpm is None or next_track.bpm is None:
             return MIX_SECONDS if available_seconds < 16.0 else min(16.0, available_seconds)

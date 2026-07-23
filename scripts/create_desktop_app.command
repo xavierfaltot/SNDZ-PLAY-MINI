@@ -1,7 +1,8 @@
 #!/bin/zsh
 set -e
 
-APP_NAME="SNDZ PLAY MINI"
+APP_NAME="${SNDZ_DESKTOP_APP_NAME:-SNDZ PLAY MINI}"
+BUNDLE_IDENTIFIER="${SNDZ_BUNDLE_IDENTIFIER:-com.rushoperator.sndzplaymini}"
 REPO_DIR="${0:A:h:h}"
 APP_DIR="$HOME/Desktop/$APP_NAME.app"
 
@@ -55,7 +56,7 @@ cat > "$APP_DIR/Contents/Info.plist" <<PLIST
   <key>CFBundleIconFile</key>
   <string>$ICON_FILE</string>
   <key>CFBundleIdentifier</key>
-  <string>com.rushoperator.sndzplaymini</string>
+  <string>$BUNDLE_IDENTIFIER</string>
   <key>CFBundleName</key>
   <string>$APP_NAME</string>
   <key>CFBundlePackageType</key>

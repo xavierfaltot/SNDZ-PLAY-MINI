@@ -8,6 +8,7 @@ from sndz_play_mini.bpm import (
     SonoTrack,
     CUT_OVERLAP_SECONDS,
     analyze_folder,
+    analyze_track,
     find_audio_files,
     find_tool,
     first_beat_seconds_from_energies,
@@ -65,6 +66,17 @@ def test_analyze_folder_uses_estimator_and_sorts(tmp_path) -> None:
         ("c.mp3", 110.0),
         ("a.mp3", 128.0),
     ]
+
+
+def test_analyze_track_uses_same_metadata_path(tmp_path) -> None:
+    track_path = tmp_path / "single.mp3"
+    track_path.write_bytes(b"")
+
+    track, error = analyze_track(track_path, estimator=lambda _path: 121.0)
+
+    assert error is None
+    assert track.path == track_path
+    assert track.bpm == 121.0
 
 
 def test_mixable_intro_energy_gate() -> None:
@@ -288,6 +300,71 @@ def test_next_can_advance_multiple_times(monkeypatch, tmp_path) -> None:
 
     assert played_indexes == [1, 2]
     assert window.play_index == 2
+
+    window.close()
+    assert app is not None
+
+
+def test_dropped_track_is_queued_after_current_track(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    app = QApplication.instance() or QApplication(sys.argv)
+    window = SonoWindow()
+    window.tracks = [
+        SonoTrack(tmp_path / "one.mp3", 90.0),
+        SonoTrack(tmp_path / "two.mp3", 100.0),
+    ]
+    dropped = SonoTrack(tmp_path / "drop.mp3", 95.0)
+
+    window.play_index = 0
+    window._queue_next_track(dropped)
+
+    assert [track.path.name for track in window.tracks] == ["one.mp3", "drop.mp3", "two.mp3"]
+
+    window.close()
+    assert app is not None
+
+
+def test_dropped_track_after_last_track_becomes_next_in_loop(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    app = QApplication.instance() or QApplication(sys.argv)
+    window = SonoWindow()
+    window.tracks = [
+        SonoTrack(tmp_path / "slow.mp3", 80.0),
+        SonoTrack(tmp_path / "fast.mp3", 140.0),
+    ]
+    dropped = SonoTrack(tmp_path / "drop.mp3", 132.0)
+
+    window.play_index = 1
+    window._queue_next_track(dropped)
+
+    assert [track.path.name for track in window.tracks] == ["slow.mp3", "fast.mp3", "drop.mp3"]
+    assert (window.play_index + 1) % len(window.tracks) == 2
+
+    window.close()
+    assert app is not None
+
+
+def test_drop_next_track_keeps_current_title_while_playing(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    app = QApplication.instance() or QApplication(sys.argv)
+    window = SonoWindow()
+    window.tracks = [SonoTrack(tmp_path / "current.mp3", 100.0)]
+    dropped_path = tmp_path / "priority.mp3"
+    dropped_path.write_bytes(b"")
+    dropped = SonoTrack(dropped_path, 110.0)
+
+    class FakePlayer:
+        pass
+
+    window.current_player = FakePlayer()  # type: ignore[assignment]
+    window.current_title.setText("CURRENT")
+    monkeypatch.setattr("sndz_play_mini.ui.analyze_track", lambda _path: (dropped, None))
+
+    window._drop_next_track(dropped_path)
+
+    assert [track.path.name for track in window.tracks] == ["current.mp3", "priority.mp3"]
+    assert window.current_title.text() == "CURRENT"
+    assert window.next_button.isEnabled()
 
     window.close()
     assert app is not None

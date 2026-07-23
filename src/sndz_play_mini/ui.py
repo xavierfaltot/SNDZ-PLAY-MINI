@@ -25,7 +25,9 @@ from .bpm import (
     MIX_SECONDS,
     SonoError,
     SonoTrack,
+    SUPPORTED_AUDIO_EXTENSIONS,
     analyze_folder,
+    analyze_track,
     find_tool,
     smart_eq_filters,
 )
@@ -49,11 +51,42 @@ class IndustrialPanel(QFrame):
 
 class ClickableLogo(QLabel):
     clicked = Signal()
+    dropped = Signal(object)
+
+    def __init__(self, text: str = "") -> None:
+        super().__init__(text)
+        self.setAcceptDrops(True)
 
     def mousePressEvent(self, event) -> None:  # noqa: ANN001
         if event.button() == Qt.LeftButton:
             self.clicked.emit()
         super().mousePressEvent(event)
+
+    def dragEnterEvent(self, event) -> None:  # noqa: ANN001
+        if self._audio_path_from_event(event):
+            event.acceptProposedAction()
+            return
+        event.ignore()
+
+    def dropEvent(self, event) -> None:  # noqa: ANN001
+        path = self._audio_path_from_event(event)
+        if path:
+            self.dropped.emit(path)
+            event.acceptProposedAction()
+            return
+        event.ignore()
+
+    def _audio_path_from_event(self, event) -> Path | None:  # noqa: ANN001
+        mime_data = event.mimeData()
+        if not mime_data.hasUrls():
+            return None
+        for url in mime_data.urls():
+            if not url.isLocalFile():
+                continue
+            path = Path(url.toLocalFile())
+            if path.is_file() and path.suffix.lower() in SUPPORTED_AUDIO_EXTENSIONS:
+                return path
+        return None
 
 
 class TransportButton(QPushButton):
@@ -170,6 +203,7 @@ class SonoWindow(QMainWindow):
         self.logo.setAlignment(Qt.AlignCenter)
         self.logo.setCursor(Qt.PointingHandCursor)
         self.logo.clicked.connect(self._choose_folder)
+        self.logo.dropped.connect(self._drop_next_track)
         self.logo.setFixedSize(TILE_SIZE, TILE_SIZE)
         if SNDZ_LOGO_PATH.exists():
             pixmap = QPixmap(str(SNDZ_LOGO_PATH))
@@ -371,6 +405,39 @@ class SonoWindow(QMainWindow):
 
     def _track_title(self, track: SonoTrack) -> str:
         return track.path.stem.replace("_", " ").strip().upper() or track.path.name.upper()
+
+    def _drop_next_track(self, path: Path) -> None:
+        path = path.expanduser().resolve()
+        if path.suffix.lower() not in SUPPORTED_AUDIO_EXTENSIONS or not path.is_file():
+            self._set_status("DROP AUDIO")
+            return
+
+        track, error = analyze_track(path)
+        self._queue_next_track(track)
+        tooltip = self.current_title.toolTip()
+        if error:
+            tooltip = "\n".join(part for part in (tooltip, error) if part)
+        self.current_title.setToolTip(tooltip)
+
+        if self.current_player:
+            self._set_status("NEXT READY")
+            self.current_title.setText(self._track_title(self.tracks[self.play_index]))
+            self.next_button.setEnabled(self._has_next_track())
+            return
+
+        self._set_status("READY")
+        self.current_title.setText(self._track_title(track))
+
+    def _queue_next_track(self, track: SonoTrack) -> None:
+        if not self.tracks:
+            self.tracks = [track]
+            self.play_index = 0
+        else:
+            insert_index = min(self.play_index + 1, len(self.tracks))
+            self.tracks.insert(insert_index, track)
+        self.play_button.setEnabled(bool(self.tracks) and self.current_player is None)
+        self._set_start_buttons_enabled(bool(self.tracks) and self.current_player is None)
+        self.next_button.setEnabled(self.current_player is not None and self._has_next_track())
 
     def _set_start_buttons_enabled(self, enabled: bool) -> None:
         for button in (self.low_button, self.half_button, self.high_button):

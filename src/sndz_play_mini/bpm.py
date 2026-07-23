@@ -424,6 +424,42 @@ def sort_tracks_by_bpm(tracks: list[SonoTrack]) -> list[SonoTrack]:
     )
 
 
+def analyze_track(path: Path, estimator: Estimator = estimate_bpm) -> tuple[SonoTrack, str | None]:
+    try:
+        bpm = estimator(path)
+        duration = probe_duration_seconds(path)
+        key = estimate_key(path)
+        first_beat = first_beat_seconds(path)
+        variable_tempo = detect_variable_tempo(path, bpm, duration)
+        intro_seconds = mixable_intro_seconds(path)
+        outro_seconds = mixable_outro_seconds(path, duration)
+        error = None
+    except SonoError as exc:
+        bpm = None
+        duration = None
+        key = ""
+        first_beat = 0.0
+        variable_tempo = False
+        intro_seconds = 0.0
+        outro_seconds = 0.0
+        error = f"{path.name}: {exc}"
+
+    return (
+        SonoTrack(
+            path=path,
+            bpm=bpm,
+            duration_seconds=duration,
+            key=key,
+            first_beat_seconds=first_beat,
+            variable_tempo=variable_tempo,
+            mixable_intro=intro_seconds >= MIX_SECONDS,
+            mixable_intro_seconds=intro_seconds,
+            mixable_outro_seconds=outro_seconds,
+        ),
+        error,
+    )
+
+
 def analyze_folder(
     folder: Path,
     estimator: Estimator = estimate_bpm,
@@ -439,36 +475,10 @@ def analyze_folder(
     for index, path in enumerate(files, start=1):
         if progress:
             progress(f"BPM {index}/{total}", int(((index - 1) / total) * 100))
-        try:
-            bpm = estimator(path)
-            duration = probe_duration_seconds(path)
-            key = estimate_key(path)
-            first_beat = first_beat_seconds(path)
-            variable_tempo = detect_variable_tempo(path, bpm, duration)
-            intro_seconds = mixable_intro_seconds(path)
-            outro_seconds = mixable_outro_seconds(path, duration)
-        except SonoError as exc:
-            bpm = None
-            duration = None
-            key = ""
-            first_beat = 0.0
-            variable_tempo = False
-            intro_seconds = 0.0
-            outro_seconds = 0.0
-            errors.append(f"{path.name}: {exc}")
-        tracks.append(
-            SonoTrack(
-                path=path,
-                bpm=bpm,
-                duration_seconds=duration,
-                key=key,
-                first_beat_seconds=first_beat,
-                variable_tempo=variable_tempo,
-                mixable_intro=intro_seconds >= MIX_SECONDS,
-                mixable_intro_seconds=intro_seconds,
-                mixable_outro_seconds=outro_seconds,
-            )
-        )
+        track, error = analyze_track(path, estimator=estimator)
+        tracks.append(track)
+        if error:
+            errors.append(error)
         if progress:
             progress(f"BPM {index}/{total}", int((index / total) * 100))
 

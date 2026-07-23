@@ -1,20 +1,33 @@
-# SNDZ PLAY MINI
+# SNDZ PLAY MINI 2.0
 
 SNDZ PLAY MINI is a tiny desktop audio player for local sound folders.
 
 Click the logo, choose a folder, then the app analyzes local audio tempo immediately. Press the play icon to play the list from lowest BPM to highest BPM, so the energy climbs. Press next to jump forward.
 
+The three bottom buttons choose the BPM start point:
+
+```text
+LOW  -> start from the calmest/lowest BPM track
+HALF -> start from the middle of the detected BPM climb
+HIGH -> start from the first high-BPM section
+```
+
 The app stays intentionally small:
 
 - logo folder pick
-- automatic BPM analysis
+- automatic BPM analysis with range normalization to avoid half/double BPM mistakes
+- first-beat cue detection for an internal beatgrid start
+- rough local key detection for harmonic mix assist
+- variable-tempo flagging for disco, funk, and live-feeling tracks
 - sorted queue
 - icon controls for play and next
+- LOW / HALF / HIGH start buttons
+- looping from the calmest track after the highest track
 - adaptive crossfade
 - smart playback EQ and loudness matching when `ffplay` is available
 - current track title only
 
-Mixes stay short by default, then get longer when the current outro and next intro have usable music beds and the BPMs are close. A small local mix-assist layer applies playback-only EQ and loudness matching: sub-bass cleanup, high cut, gentle compression, BPM-aware low/presence gains, and `loudnorm` so tracks come out at a more consistent perceived volume. It does not write analysis files or modify the source sounds.
+Mixes stay short by default, then get longer when the current outro and next intro have usable music beds and the BPMs are close. If a long transition is not possible, the player uses a tight cut/mini-overlap instead of leaving silence. A small local mix-assist layer applies playback-only EQ and loudness matching: sub-bass cleanup, high cut, gentle compression, BPM-aware low/presence gains, and `loudnorm` so tracks come out at a more consistent perceived volume. It does not write analysis files or modify the source sounds.
 
 It does not tag, rewrite, beatmatch, or alter source files.
 

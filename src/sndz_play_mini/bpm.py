@@ -4,7 +4,9 @@ import shutil
 import subprocess
 import warnings
 from dataclasses import dataclass
+from array import array
 import os
+import math
 from pathlib import Path
 from typing import Callable
 
@@ -12,24 +14,30 @@ with warnings.catch_warnings():
     warnings.simplefilter("ignore", DeprecationWarning)
     import audioop
 
-SONO_VERSION = "1.0"
+SONO_VERSION = "2.0"
 SAMPLE_RATE = 11025
 WINDOW_SAMPLES = 1024
 HOP_SAMPLES = 512
 ENERGY_FRAME_SECONDS = HOP_SAMPLES / SAMPLE_RATE
 MIN_BPM = 60
 MAX_BPM = 190
+BPM_RANGE_MIN = 70
+BPM_RANGE_MAX = 150
 MAX_ANALYSIS_SECONDS = 120
 INTRO_ANALYSIS_SECONDS = 32
 OUTRO_ANALYSIS_SECONDS = 32
 MIX_SECONDS = 8.0
 MAX_MIX_SECONDS = 28.0
 MIN_MIX_DURATION_SECONDS = 24.0
+CUT_OVERLAP_SECONDS = 0.35
 EQ_LOW_CUT_HZ = 35
 EQ_HIGH_CUT_HZ = 18000
 LOUDNESS_TARGET_LUFS = -16
 LOUDNESS_TRUE_PEAK_DB = -1.5
 LOUDNESS_RANGE_LU = 9
+PITCH_CLASSES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
+MAJOR_PROFILE = (6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88)
+MINOR_PROFILE = (6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17)
 SUPPORTED_AUDIO_EXTENSIONS = {
     ".aac",
     ".aif",
@@ -58,6 +66,9 @@ class SonoTrack:
     path: Path
     bpm: float | None
     duration_seconds: float | None = None
+    key: str = ""
+    first_beat_seconds: float = 0.0
+    variable_tempo: bool = False
     mixable_intro: bool = False
     mixable_intro_seconds: float = 0.0
     mixable_outro_seconds: float = 0.0
@@ -207,7 +218,26 @@ def estimate_bpm(path: Path, min_bpm: int = MIN_BPM, max_bpm: int = MAX_BPM) -> 
     best_score, best_bpm = max(scores, key=lambda item: item[0])
     if best_score <= 0:
         return None
-    return float(best_bpm)
+    return normalize_bpm_to_range(float(best_bpm))
+
+
+def normalize_bpm_to_range(
+    bpm: float | None,
+    min_bpm: int = BPM_RANGE_MIN,
+    max_bpm: int = BPM_RANGE_MAX,
+) -> float | None:
+    if bpm is None or bpm <= 0:
+        return None
+    value = float(bpm)
+    while value < min_bpm:
+        value *= 2.0
+    while value > max_bpm:
+        value /= 2.0
+    if value < min_bpm:
+        return float(min_bpm)
+    if value > max_bpm:
+        return float(max_bpm)
+    return round(value, 2)
 
 
 def is_mixable_intro_from_energies(energies: list[float]) -> bool:
@@ -258,6 +288,102 @@ def mixable_outro_seconds(path: Path, duration_seconds: float | None) -> float:
     except SonoError:
         return 0.0
     return mixable_region_seconds_from_energies(energy_envelope(pcm), from_start=False)
+
+
+def first_beat_seconds_from_energies(energies: list[float]) -> float:
+    if not energies:
+        return 0.0
+    threshold = max(0.18, min(0.55, (sum(energies) / len(energies)) * 2.0))
+    for index, value in enumerate(energies):
+        if value >= threshold:
+            return round(index * ENERGY_FRAME_SECONDS, 3)
+    return 0.0
+
+
+def first_beat_seconds(path: Path) -> float:
+    try:
+        pcm = decode_audio_pcm(path, max_seconds=INTRO_ANALYSIS_SECONDS)
+    except SonoError:
+        return 0.0
+    return first_beat_seconds_from_energies(energy_envelope(pcm))
+
+
+def detect_variable_tempo(path: Path, bpm: float | None, duration_seconds: float | None) -> bool:
+    if bpm is None or not duration_seconds or duration_seconds < 90:
+        return False
+    try:
+        early = estimate_bpm_segment(path, start_seconds=0.0)
+        late = estimate_bpm_segment(path, start_seconds=max(0.0, duration_seconds - MAX_ANALYSIS_SECONDS))
+    except SonoError:
+        return False
+    if early is None or late is None:
+        return False
+    return abs(early - late) >= 4.0
+
+
+def estimate_bpm_segment(path: Path, start_seconds: float) -> float | None:
+    pcm = decode_audio_pcm(path, max_seconds=MAX_ANALYSIS_SECONDS, start_seconds=start_seconds)
+    onsets = onset_envelope(energy_envelope(pcm))
+    if not onsets or sum(onsets) < 0.2:
+        return None
+    scores = [(bpm_score(onsets, bpm), bpm) for bpm in range(MIN_BPM, MAX_BPM + 1)]
+    best_score, best_bpm = max(scores, key=lambda item: item[0])
+    return normalize_bpm_to_range(float(best_bpm)) if best_score > 0 else None
+
+
+def _pcm_samples(pcm: bytes, max_samples: int = 8192) -> list[float]:
+    samples = array("h")
+    samples.frombytes(pcm[: max_samples * 2])
+    if not samples:
+        return []
+    peak = max(abs(value) for value in samples) or 1
+    return [value / peak for value in samples]
+
+
+def _goertzel_power(samples: list[float], frequency: float) -> float:
+    if not samples:
+        return 0.0
+    normalized = frequency / SAMPLE_RATE
+    coefficient = 2.0 * math.cos(2.0 * math.pi * normalized)
+    q1 = 0.0
+    q2 = 0.0
+    for sample in samples:
+        q0 = coefficient * q1 - q2 + sample
+        q2 = q1
+        q1 = q0
+    return q1 * q1 + q2 * q2 - coefficient * q1 * q2
+
+
+def estimate_key(path: Path) -> str:
+    try:
+        pcm = decode_audio_pcm(path, max_seconds=24)
+    except SonoError:
+        return ""
+    samples = _pcm_samples(pcm)
+    if not samples:
+        return ""
+
+    chroma = [0.0] * 12
+    for midi_note in range(36, 85):
+        frequency = 440.0 * (2.0 ** ((midi_note - 69) / 12.0))
+        chroma[midi_note % 12] += _goertzel_power(samples, frequency)
+    peak = max(chroma, default=0.0)
+    if peak <= 0:
+        return ""
+    chroma = [value / peak for value in chroma]
+
+    best_score = -1.0
+    best_key = ""
+    for root in range(12):
+        major_score = sum(chroma[(root + offset) % 12] * MAJOR_PROFILE[offset] for offset in range(12))
+        minor_score = sum(chroma[(root + offset) % 12] * MINOR_PROFILE[offset] for offset in range(12))
+        if major_score > best_score:
+            best_score = major_score
+            best_key = PITCH_CLASSES[root]
+        if minor_score > best_score:
+            best_score = minor_score
+            best_key = f"{PITCH_CLASSES[root]}m"
+    return best_key
 
 
 def smart_eq_gains(track: SonoTrack) -> tuple[float, float]:
@@ -316,11 +442,17 @@ def analyze_folder(
         try:
             bpm = estimator(path)
             duration = probe_duration_seconds(path)
+            key = estimate_key(path)
+            first_beat = first_beat_seconds(path)
+            variable_tempo = detect_variable_tempo(path, bpm, duration)
             intro_seconds = mixable_intro_seconds(path)
             outro_seconds = mixable_outro_seconds(path, duration)
         except SonoError as exc:
             bpm = None
             duration = None
+            key = ""
+            first_beat = 0.0
+            variable_tempo = False
             intro_seconds = 0.0
             outro_seconds = 0.0
             errors.append(f"{path.name}: {exc}")
@@ -329,6 +461,9 @@ def analyze_folder(
                 path=path,
                 bpm=bpm,
                 duration_seconds=duration,
+                key=key,
+                first_beat_seconds=first_beat,
+                variable_tempo=variable_tempo,
                 mixable_intro=intro_seconds >= MIX_SECONDS,
                 mixable_intro_seconds=intro_seconds,
                 mixable_outro_seconds=outro_seconds,

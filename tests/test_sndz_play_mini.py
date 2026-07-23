@@ -6,11 +6,14 @@ from PySide6.QtWidgets import QApplication, QLineEdit, QListWidget
 
 from sndz_play_mini.bpm import (
     SonoTrack,
+    CUT_OVERLAP_SECONDS,
     analyze_folder,
     find_audio_files,
     find_tool,
+    first_beat_seconds_from_energies,
     is_mixable_intro_from_energies,
     mixable_region_seconds_from_energies,
+    normalize_bpm_to_range,
     smart_eq_filters,
     smart_eq_gains,
     sort_tracks_by_bpm,
@@ -35,6 +38,18 @@ def test_sorts_from_low_bpm_to_high_bpm(tmp_path) -> None:
     mid = SonoTrack(tmp_path / "mid.mp3", 108.0)
 
     assert sort_tracks_by_bpm([unknown, fast, slow, mid]) == [slow, mid, fast, unknown]
+
+
+def test_normalizes_bpm_to_dj_range() -> None:
+    assert normalize_bpm_to_range(70.0) == 70.0
+    assert normalize_bpm_to_range(62.0) == 124.0
+    assert normalize_bpm_to_range(176.0) == 88.0
+
+
+def test_first_beat_uses_first_strong_energy_frame() -> None:
+    energies = [0.01, 0.02, 0.03, 0.42, 0.45]
+
+    assert first_beat_seconds_from_energies(energies) > 0.0
 
 
 def test_analyze_folder_uses_estimator_and_sorts(tmp_path) -> None:
@@ -95,6 +110,9 @@ def test_ui_is_logo_driven_and_minimal(monkeypatch) -> None:
     assert window.next_button.text() == ""
     assert window.play_button.accessibleName() == "PLAY"
     assert window.next_button.accessibleName() == "NEXT"
+    assert window.low_button.text() == "LOW"
+    assert window.half_button.text() == "HALF"
+    assert window.high_button.text() == "HIGH"
     assert not hasattr(window, "stop_button")
     assert window.play_button.width() == window.logo.width()
     assert window.next_button.width() == window.logo.width()
@@ -141,6 +159,25 @@ def test_status_progress_uses_title_bar(monkeypatch) -> None:
     assert window.windowTitle() == "SNDZ PLAY MINI - BPM 42%"
     window._set_status("READY")
     assert window.windowTitle() == "SNDZ PLAY MINI"
+
+    window.close()
+    assert app is not None
+
+
+def test_start_buttons_pick_bpm_zones(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    app = QApplication.instance() or QApplication(sys.argv)
+    window = SonoWindow()
+    window.tracks = [
+        SonoTrack(tmp_path / "slow.mp3", 80.0),
+        SonoTrack(tmp_path / "mid_a.mp3", 100.0),
+        SonoTrack(tmp_path / "mid_b.mp3", 120.0),
+        SonoTrack(tmp_path / "fast.mp3", 140.0),
+    ]
+
+    assert window._start_index_for_mode("low") == 0
+    assert window._start_index_for_mode("half") == 2
+    assert window._start_index_for_mode("high") == 2
 
     window.close()
     assert app is not None
@@ -203,7 +240,29 @@ def test_next_stays_enabled_until_last_track(monkeypatch, tmp_path) -> None:
 
     window.play_index = 2
     window._sync_transport_buttons(playing=True)
-    assert not window.next_button.isEnabled()
+    assert window.next_button.isEnabled()
+
+    window.close()
+    assert app is not None
+
+
+def test_last_track_loops_to_calmest_without_stop(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    app = QApplication.instance() or QApplication(sys.argv)
+    window = SonoWindow()
+    window.tracks = [
+        SonoTrack(tmp_path / "slow.mp3", 80.0),
+        SonoTrack(tmp_path / "fast.mp3", 140.0),
+    ]
+    played_indexes: list[int] = []
+
+    monkeypatch.setattr(window, "_play_current", lambda fade_in: played_indexes.append(window.play_index))
+
+    window.play_index = 1
+    window._auto_next_mix()
+
+    assert window.play_index == 0
+    assert played_indexes == [0]
 
     window.close()
     assert app is not None
@@ -276,7 +335,22 @@ def test_uses_long_mix_for_similar_bpm_and_long_regions(monkeypatch, tmp_path) -
         mixable_intro_seconds=4.0,
         mixable_outro_seconds=28.0,
     )
-    assert window._transition_mix_seconds(window.tracks[0]) == 0.0
+    assert window._transition_mix_seconds(window.tracks[0]) == CUT_OVERLAP_SECONDS
+
+    window.close()
+    assert app is not None
+
+
+def test_transition_uses_cut_overlap_when_long_mix_is_not_possible(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    app = QApplication.instance() or QApplication(sys.argv)
+    window = SonoWindow()
+    window.tracks = [
+        SonoTrack(tmp_path / "one.mp3", 120.0, duration_seconds=180.0),
+        SonoTrack(tmp_path / "two.mp3", 122.0, duration_seconds=180.0, mixable_intro_seconds=0.0),
+    ]
+
+    assert window._transition_mix_seconds(window.tracks[0]) == CUT_OVERLAP_SECONDS
 
     window.close()
     assert app is not None

@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from .bpm import (
+    CUT_OVERLAP_SECONDS,
     MAX_MIX_SECONDS,
     MIN_MIX_DURATION_SECONDS,
     MIX_SECONDS,
@@ -34,9 +35,10 @@ SNDZ_LOGO_PATH = Path(__file__).resolve().parent / "assets" / "sndz_play_mini_lo
 TILE_SIZE = 170
 CONTROL_GAP = 12
 PANEL_WIDTH = TILE_SIZE * 2 + CONTROL_GAP + 24
-PANEL_HEIGHT = 432
+PANEL_HEIGHT = 492
 WINDOW_WIDTH = 430
-WINDOW_HEIGHT = 476
+WINDOW_HEIGHT = 536
+START_BUTTON_HEIGHT = 38
 
 
 class IndustrialPanel(QFrame):
@@ -194,9 +196,30 @@ class SonoWindow(QMainWindow):
         self.current_title.setWordWrap(True)
         layout.addWidget(self.current_title)
 
+        start_row = QHBoxLayout()
+        start_row.setSpacing(8)
+        self.low_button = self._start_button("LOW", "START LOW")
+        self.half_button = self._start_button("HALF", "START HALF")
+        self.high_button = self._start_button("HIGH", "START HIGH")
+        self.low_button.clicked.connect(lambda: self._start_playback("low"))
+        self.half_button.clicked.connect(lambda: self._start_playback("half"))
+        self.high_button.clicked.connect(lambda: self._start_playback("high"))
+        start_row.addWidget(self.low_button)
+        start_row.addWidget(self.half_button)
+        start_row.addWidget(self.high_button)
+        layout.addLayout(start_row)
+
     def _transport_button(self, object_name: str, mode: str, name: str) -> TransportButton:
         button = TransportButton(mode, name)
         button.setObjectName(object_name)
+        return button
+
+    def _start_button(self, text: str, name: str) -> QPushButton:
+        button = QPushButton(text)
+        button.setObjectName("startButton")
+        button.setAccessibleName(name)
+        button.setFixedHeight(START_BUTTON_HEIGHT)
+        button.setEnabled(False)
         return button
 
     def _apply_style(self) -> None:
@@ -261,6 +284,21 @@ class SonoWindow(QMainWindow):
                 font-size: 11px;
                 font-weight: 900;
             }
+            #startButton {
+                min-height: 38px;
+                max-height: 38px;
+                color: #d8d0c0;
+                background: #050505;
+                border: 2px solid #302c26;
+                font-family: "Courier New", monospace;
+                font-size: 12px;
+                font-weight: 900;
+            }
+            #startButton:disabled {
+                color: #413d37;
+                border-color: #1b1916;
+                background: #030303;
+            }
             """
         )
 
@@ -271,6 +309,7 @@ class SonoWindow(QMainWindow):
             self.tracks = []
             self.play_button.setEnabled(False)
             self.next_button.setEnabled(False)
+            self._set_start_buttons_enabled(False)
             self.current_title.setText("SCANNING")
             self._start_analysis()
 
@@ -286,6 +325,7 @@ class SonoWindow(QMainWindow):
         self.logo.setEnabled(False)
         self.play_button.setEnabled(False)
         self.next_button.setEnabled(False)
+        self._set_start_buttons_enabled(False)
         self.current_title.setText("SCANNING")
         self._set_status("BPM 0%")
 
@@ -312,6 +352,7 @@ class SonoWindow(QMainWindow):
         self.tracks = tracks
         self.play_button.setEnabled(bool(self.tracks))
         self.next_button.setEnabled(False)
+        self._set_start_buttons_enabled(bool(self.tracks))
         self._set_status("READY")
         self.current_title.setToolTip("\n".join(errors[:12]) if errors else "")
         if self.tracks:
@@ -331,7 +372,20 @@ class SonoWindow(QMainWindow):
     def _track_title(self, track: SonoTrack) -> str:
         return track.path.stem.replace("_", " ").strip().upper() or track.path.name.upper()
 
-    def _start_playback(self) -> None:
+    def _set_start_buttons_enabled(self, enabled: bool) -> None:
+        for button in (self.low_button, self.half_button, self.high_button):
+            button.setEnabled(enabled)
+
+    def _start_index_for_mode(self, mode: str) -> int:
+        if not self.tracks:
+            return 0
+        if mode == "high":
+            return min(len(self.tracks) - 1, max(0, (len(self.tracks) * 2) // 3))
+        if mode == "half":
+            return min(len(self.tracks) - 1, len(self.tracks) // 2)
+        return 0
+
+    def _start_playback(self, mode: str = "low") -> None:
         if not self.tracks:
             self._set_status("NO TRACKS")
             self.current_title.setText("NO TRACKS")
@@ -344,8 +398,9 @@ class SonoWindow(QMainWindow):
         self.player_tool = player_tool
         self._stop_playback(reset_status=False)
         self.stop_requested = False
-        self.play_index = 0
+        self.play_index = self._start_index_for_mode(mode)
         self.play_button.setEnabled(False)
+        self._set_start_buttons_enabled(False)
         self._play_current(fade_in=False)
 
     def _playback_tool(self) -> str | None:
@@ -353,11 +408,7 @@ class SonoWindow(QMainWindow):
 
     def _play_current(self, fade_in: bool) -> None:
         if self.play_index >= len(self.tracks):
-            self.current_player = None
-            self.play_button.setEnabled(True)
-            self.next_button.setEnabled(False)
-            self._set_status("DONE")
-            return
+            self.play_index = 0
 
         track = self.tracks[self.play_index]
         mix_seconds = self._transition_mix_seconds(track)
@@ -390,17 +441,21 @@ class SonoWindow(QMainWindow):
     def _transition_mix_seconds(self, track: SonoTrack) -> float:
         next_index = self.play_index + 1
         if next_index >= len(self.tracks):
-            return 0.0
+            next_index = 0
         next_track = self.tracks[next_index]
-        if not track.duration_seconds or track.duration_seconds < MIN_MIX_DURATION_SECONDS:
+        if next_track is track:
             return 0.0
+        if not track.duration_seconds:
+            return 0.0
+        if track.duration_seconds < MIN_MIX_DURATION_SECONDS:
+            return CUT_OVERLAP_SECONDS
         if next_track.mixable_intro_seconds < MIX_SECONDS:
-            return 0.0
+            return CUT_OVERLAP_SECONDS
 
         outro_seconds = track.mixable_outro_seconds if track.mixable_outro_seconds >= MIX_SECONDS else MIX_SECONDS
         available_seconds = min(outro_seconds, next_track.mixable_intro_seconds, MAX_MIX_SECONDS)
         if available_seconds < MIX_SECONDS:
-            return 0.0
+            return CUT_OVERLAP_SECONDS
 
         if track.bpm is None or next_track.bpm is None:
             return MIX_SECONDS if available_seconds < 16.0 else min(16.0, available_seconds)
@@ -443,16 +498,16 @@ class SonoWindow(QMainWindow):
             self.next_button.setEnabled(False)
 
     def _has_next_track(self) -> bool:
-        return self.play_index + 1 < len(self.tracks)
+        return len(self.tracks) > 1
 
     def _sync_transport_buttons(self, playing: bool) -> None:
         self.play_button.setEnabled(bool(self.tracks) and not playing)
         self.next_button.setEnabled(playing and self._has_next_track())
 
     def _auto_next_mix(self) -> None:
-        if self.stop_requested or self.play_index + 1 >= len(self.tracks):
+        if self.stop_requested or len(self.tracks) < 2:
             return
-        self.play_index += 1
+        self.play_index = (self.play_index + 1) % len(self.tracks)
         self._play_current(fade_in=True)
 
     def _on_player_finished(self, process: QProcess) -> None:
@@ -465,16 +520,15 @@ class SonoWindow(QMainWindow):
             return
         process.deleteLater()
         self.mix_timer.stop()
-        self.play_index += 1
+        self.play_index = (self.play_index + 1) % len(self.tracks) if self.tracks else 0
         self._play_current(fade_in=False)
 
     def _next_track(self) -> None:
         if not self.tracks:
             return
-        next_index = self.play_index + 1
-        if next_index >= len(self.tracks):
-            self._finish_playback()
+        if len(self.tracks) < 2:
             return
+        next_index = (self.play_index + 1) % len(self.tracks)
 
         self.mix_timer.stop()
         self.stop_requested = True
@@ -498,6 +552,7 @@ class SonoWindow(QMainWindow):
         self.current_player = None
         self.play_button.setEnabled(bool(self.tracks))
         self.next_button.setEnabled(False)
+        self._set_start_buttons_enabled(bool(self.tracks))
         if reset_status:
             self._set_status("READY")
 

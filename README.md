@@ -2,7 +2,7 @@
 
 SNDZ PLAY MINI is a tiny desktop audio player for local sound folders.
 
-Click the logo, choose a folder, then the app analyzes local audio tempo immediately. Press the play icon to play the list from lowest BPM to highest BPM, so the energy climbs. Press next to jump forward. While playing, drop an audio file on the logo to make it the next track.
+Click the logo, choose a folder, then the app analyzes local audio tempo immediately. Press the play icon to play the list from lowest BPM to highest BPM, so the energy climbs. Press next to jump forward. While playing, drop audio files on the logo: the first dropped file becomes the next track, and the other dropped files are analyzed and diluted into the BPM flow.
 
 The three bottom buttons choose the BPM start point:
 
@@ -20,7 +20,7 @@ The app stays intentionally small:
 - rough local key detection for harmonic mix assist
 - variable-tempo flagging for disco, funk, and live-feeling tracks
 - sorted queue
-- live drop-to-logo next-track queue
+- live drop-to-logo queue: first drop next, remaining drops diluted by BPM
 - icon controls for play and next
 - LOW / HALF / HIGH start buttons
 - looping from the calmest track after the highest track

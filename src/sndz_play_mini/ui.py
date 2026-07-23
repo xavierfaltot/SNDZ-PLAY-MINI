@@ -29,6 +29,7 @@ from .bpm import (
     analyze_folder,
     analyze_track,
     find_tool,
+    sort_tracks_by_bpm,
     smart_eq_filters,
 )
 
@@ -63,30 +64,36 @@ class ClickableLogo(QLabel):
         super().mousePressEvent(event)
 
     def dragEnterEvent(self, event) -> None:  # noqa: ANN001
-        if self._audio_path_from_event(event):
+        if self._audio_paths_from_event(event):
             event.acceptProposedAction()
             return
         event.ignore()
 
     def dropEvent(self, event) -> None:  # noqa: ANN001
-        path = self._audio_path_from_event(event)
-        if path:
-            self.dropped.emit(path)
+        paths = self._audio_paths_from_event(event)
+        if paths:
+            self.dropped.emit(paths)
             event.acceptProposedAction()
             return
         event.ignore()
 
-    def _audio_path_from_event(self, event) -> Path | None:  # noqa: ANN001
+    def _audio_paths_from_event(self, event) -> list[Path]:  # noqa: ANN001
         mime_data = event.mimeData()
         if not mime_data.hasUrls():
-            return None
+            return []
+        paths: list[Path] = []
+        seen: set[Path] = set()
         for url in mime_data.urls():
             if not url.isLocalFile():
                 continue
             path = Path(url.toLocalFile())
-            if path.is_file() and path.suffix.lower() in SUPPORTED_AUDIO_EXTENSIONS:
-                return path
-        return None
+            if path in seen:
+                continue
+            if not path.is_file() or path.suffix.lower() not in SUPPORTED_AUDIO_EXTENSIONS:
+                continue
+            paths.append(path)
+            seen.add(path)
+        return paths
 
 
 class TransportButton(QPushButton):
@@ -203,7 +210,7 @@ class SonoWindow(QMainWindow):
         self.logo.setAlignment(Qt.AlignCenter)
         self.logo.setCursor(Qt.PointingHandCursor)
         self.logo.clicked.connect(self._choose_folder)
-        self.logo.dropped.connect(self._drop_next_track)
+        self.logo.dropped.connect(self._drop_audio_paths)
         self.logo.setFixedSize(TILE_SIZE, TILE_SIZE)
         if SNDZ_LOGO_PATH.exists():
             pixmap = QPixmap(str(SNDZ_LOGO_PATH))
@@ -406,17 +413,24 @@ class SonoWindow(QMainWindow):
     def _track_title(self, track: SonoTrack) -> str:
         return track.path.stem.replace("_", " ").strip().upper() or track.path.name.upper()
 
-    def _drop_next_track(self, path: Path) -> None:
-        path = path.expanduser().resolve()
-        if path.suffix.lower() not in SUPPORTED_AUDIO_EXTENSIONS or not path.is_file():
+    def _drop_audio_paths(self, paths: list[Path]) -> None:
+        audio_paths = self._valid_audio_paths(paths)
+        if not audio_paths:
             self._set_status("DROP AUDIO")
             return
 
-        track, error = analyze_track(path)
-        self._queue_next_track(track)
+        tracks: list[SonoTrack] = []
+        errors: list[str] = []
+        for path in audio_paths:
+            track, error = analyze_track(path)
+            tracks.append(track)
+            if error:
+                errors.append(error)
+
+        self._queue_dropped_tracks(tracks)
         tooltip = self.current_title.toolTip()
-        if error:
-            tooltip = "\n".join(part for part in (tooltip, error) if part)
+        if errors:
+            tooltip = "\n".join(part for part in (tooltip, "\n".join(errors[:12])) if part)
         self.current_title.setToolTip(tooltip)
 
         if self.current_player:
@@ -426,15 +440,48 @@ class SonoWindow(QMainWindow):
             return
 
         self._set_status("READY")
-        self.current_title.setText(self._track_title(track))
+        self.current_title.setText(self._track_title(tracks[0]))
+
+    def _drop_next_track(self, path: Path) -> None:
+        self._drop_audio_paths([path])
+
+    def _valid_audio_paths(self, paths: list[Path]) -> list[Path]:
+        audio_paths: list[Path] = []
+        seen: set[Path] = set()
+        for path in paths:
+            resolved = path.expanduser().resolve()
+            if resolved in seen:
+                continue
+            if resolved.suffix.lower() not in SUPPORTED_AUDIO_EXTENSIONS or not resolved.is_file():
+                continue
+            audio_paths.append(resolved)
+            seen.add(resolved)
+        return audio_paths
+
+    def _queue_dropped_tracks(self, dropped_tracks: list[SonoTrack]) -> None:
+        if not dropped_tracks:
+            return
+
+        priority_track = dropped_tracks[0]
+        additional_tracks = dropped_tracks[1:]
+        if not self.tracks:
+            self.tracks = [priority_track, *sort_tracks_by_bpm(additional_tracks)]
+            self.play_index = 0
+            self._sync_after_queue_change()
+            return
+
+        current_index = min(self.play_index, len(self.tracks) - 1)
+        current_track = self.tracks[current_index]
+        upcoming_tracks = self.tracks[current_index + 1 :] + self.tracks[:current_index]
+        diluted_tracks = sort_tracks_by_bpm([*upcoming_tracks, *additional_tracks])
+        self.tracks = [current_track, priority_track, *diluted_tracks]
+        self.play_index = 0
+        self._sync_after_queue_change()
 
     def _queue_next_track(self, track: SonoTrack) -> None:
-        if not self.tracks:
-            self.tracks = [track]
-            self.play_index = 0
-        else:
-            insert_index = min(self.play_index + 1, len(self.tracks))
-            self.tracks.insert(insert_index, track)
+        self._queue_dropped_tracks([track])
+
+    def _sync_after_queue_change(self) -> None:
         self.play_button.setEnabled(bool(self.tracks) and self.current_player is None)
         self._set_start_buttons_enabled(bool(self.tracks) and self.current_player is None)
         self.next_button.setEnabled(self.current_player is not None and self._has_next_track())

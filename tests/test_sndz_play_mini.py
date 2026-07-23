@@ -337,8 +337,68 @@ def test_dropped_track_after_last_track_becomes_next_in_loop(monkeypatch, tmp_pa
     window.play_index = 1
     window._queue_next_track(dropped)
 
-    assert [track.path.name for track in window.tracks] == ["slow.mp3", "fast.mp3", "drop.mp3"]
-    assert (window.play_index + 1) % len(window.tracks) == 2
+    assert [track.path.name for track in window.tracks] == ["fast.mp3", "drop.mp3", "slow.mp3"]
+    assert (window.play_index + 1) % len(window.tracks) == 1
+
+    window.close()
+    assert app is not None
+
+
+def test_multiple_dropped_tracks_keep_first_next_and_dilute_rest_by_bpm(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    app = QApplication.instance() or QApplication(sys.argv)
+    window = SonoWindow()
+    window.tracks = [
+        SonoTrack(tmp_path / "slow.mp3", 80.0),
+        SonoTrack(tmp_path / "current.mp3", 100.0),
+        SonoTrack(tmp_path / "fast.mp3", 140.0),
+    ]
+    dropped_tracks = [
+        SonoTrack(tmp_path / "priority.mp3", 126.0),
+        SonoTrack(tmp_path / "warm.mp3", 92.0),
+        SonoTrack(tmp_path / "peak.mp3", 132.0),
+    ]
+
+    window.play_index = 1
+    window._queue_dropped_tracks(dropped_tracks)
+
+    assert [track.path.name for track in window.tracks] == [
+        "current.mp3",
+        "priority.mp3",
+        "slow.mp3",
+        "warm.mp3",
+        "peak.mp3",
+        "fast.mp3",
+    ]
+    assert window.play_index == 0
+
+    window.close()
+    assert app is not None
+
+
+def test_multiple_drop_paths_are_analyzed_in_drop_order(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    app = QApplication.instance() or QApplication(sys.argv)
+    window = SonoWindow()
+    window.tracks = [SonoTrack(tmp_path / "current.mp3", 100.0)]
+    paths = [tmp_path / "first.mp3", tmp_path / "second.mp3", tmp_path / "third.mp3"]
+    for path in paths:
+        path.write_bytes(b"")
+
+    bpms = {"first.mp3": 128.0, "second.mp3": 90.0, "third.mp3": 130.0}
+    monkeypatch.setattr(
+        "sndz_play_mini.ui.analyze_track",
+        lambda path: (SonoTrack(path, bpms[path.name]), None),
+    )
+
+    window._drop_audio_paths(paths)
+
+    assert [track.path.name for track in window.tracks] == [
+        "current.mp3",
+        "first.mp3",
+        "second.mp3",
+        "third.mp3",
+    ]
 
     window.close()
     assert app is not None

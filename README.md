@@ -18,6 +18,7 @@ The app stays intentionally small:
 - icon controls for play and next
 - looping from the calmest track after the highest track
 - adaptive crossfade, armed off the player's actual start signal (not a guessed timer) to keep the transition on time
+- best-effort beat alignment on the crossfade: the trigger point is nudged by up to half a beat, using each track's BPM and first-beat cue, so the blend starts in phase instead of at a blind time offset (no time-stretching or pitch-shifting: tempos still drift apart if they differ, but the transition itself starts on the beat)
 - at most two tracks ever play at once: starting a new track always cuts anything older than the one it is crossfading with
 - vocal-band gate on the crossfade: intro/outro regions dominated by energy in the ~300-3400Hz vocal range are never offered up for mixing, so two vocal lines don't overlap
 - when the very ending of a track is vocal, the outro search backs off to find an instrumental handle a bit earlier instead of cancelling the mix outright; the vocal tail past that handle is cut once the next track takes over rather than played out underneath it

@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 from .bpm import (
     GAPLESS_PREROLL_SECONDS,
     MAX_MIX_SECONDS,
+    beat_aligned_start_seconds,
     MID_MIX_SECONDS,
     MIN_MIX_DURATION_SECONDS,
     MIX_SECONDS,
@@ -600,9 +601,23 @@ class SonoWindow(QMainWindow):
         # dominant source of drift.
         fade_in_seconds_for_this_track = self.next_fade_in_seconds if fade_in else mix_seconds
         self.mix_timer.stop()
+        fade_out_start_seconds: float | None = None
         if fade_out and effective_duration:
             self.next_fade_in_seconds = mix_seconds
-            delay_ms = max(1, int((effective_duration - mix_seconds) * 1000))
+            baseline_start_seconds = effective_duration - mix_seconds
+            next_index = self._peek_next_play_index()
+            next_track = self.tracks[next_index]
+            # Best-effort beat alignment: nudge the crossfade trigger so the
+            # incoming track's first beat lands in phase with the outgoing
+            # track's beat grid, instead of cutting at a blind time offset.
+            fade_out_start_seconds = beat_aligned_start_seconds(
+                baseline_start_seconds,
+                track.bpm,
+                track.first_beat_seconds,
+                next_track.bpm,
+                next_track.first_beat_seconds,
+            )
+            delay_ms = max(1, int(fade_out_start_seconds * 1000))
             player.started.connect(
                 lambda process=player, delay=delay_ms: self._arm_mix_timer(process, delay)
             )
@@ -634,6 +649,7 @@ class SonoWindow(QMainWindow):
                 duration_limit_seconds=(
                     effective_duration if (fade_out and track.outro_tail_trim_seconds) else None
                 ),
+                fade_out_start_seconds=fade_out_start_seconds,
             ),
         )
 
@@ -683,6 +699,7 @@ class SonoWindow(QMainWindow):
         fade_out: bool,
         mix_seconds: float,
         duration_limit_seconds: float | None = None,
+        fade_out_start_seconds: float | None = None,
     ) -> list[str]:
         if Path(self.player_tool).name == "afplay":
             return [str(track.path)]
@@ -692,8 +709,14 @@ class SonoWindow(QMainWindow):
         if fade_in:
             filters.append(f"afade=t=in:st=0:d={mix_seconds:g}")
         if fade_out and track.duration_seconds:
-            end_seconds = duration_limit_seconds or track.duration_seconds
-            start = max(0.0, end_seconds - mix_seconds)
+            # Use the same beat-aligned instant the mix timer was armed
+            # with, when given one, so the audible fade and the moment the
+            # next track actually starts never drift apart.
+            if fade_out_start_seconds is not None:
+                start = max(0.0, fade_out_start_seconds)
+            else:
+                end_seconds = duration_limit_seconds or track.duration_seconds
+                start = max(0.0, end_seconds - mix_seconds)
             filters.append(f"afade=t=out:st={start:.3f}:d={mix_seconds:g}")
         if filters:
             args.extend(["-af", ",".join(filters)])

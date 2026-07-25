@@ -7,6 +7,7 @@ from PySide6.QtCore import QProcess
 from PySide6.QtWidgets import QApplication, QLineEdit, QListWidget
 
 from sndz_play_mini.bpm import (
+    beat_aligned_start_seconds,
     ENERGY_FRAME_SECONDS,
     GAPLESS_PREROLL_SECONDS,
     MAX_MIX_SECONDS,
@@ -136,6 +137,31 @@ def test_outro_window_backs_off_from_a_short_vocal_tail() -> None:
 
     assert mix_seconds > 0
     assert 0.0 < trim_seconds <= OUTRO_MAX_TAIL_TRIM_SECONDS
+
+
+def test_beat_alignment_snaps_crossfade_start_onto_the_beat_grid() -> None:
+    # Regression test for the crossfade cutting at a blind time offset with
+    # no regard for where the beats actually fall: when the two tracks
+    # share the same tempo and beat phase, a start time that is a quarter
+    # beat late must be snapped back onto the nearest shared beat instead
+    # of firing mid-beat.
+    aligned = beat_aligned_start_seconds(100.35, 120.0, 0.1, 120.0, 0.1)
+    assert abs(aligned - 100.10) < 1e-6
+
+    # Already on the beat: no nudge needed.
+    already_aligned = beat_aligned_start_seconds(100.1, 120.0, 0.1, 120.0, 0.1)
+    assert abs(already_aligned - 100.1) < 1e-9
+
+    # Never nudges by more than half a beat, and never goes negative.
+    near_zero = beat_aligned_start_seconds(0.05, 120.0, 0.4, 120.0, 0.0)
+    assert near_zero >= 0.0
+
+
+def test_beat_alignment_is_a_no_op_without_bpm_data() -> None:
+    # Without BPM on either side there is no beat grid to align to, so the
+    # original time-based start must be left untouched rather than guessed.
+    assert beat_aligned_start_seconds(50.0, None, 0.0, 120.0, 0.0) == 50.0
+    assert beat_aligned_start_seconds(50.0, 120.0, 0.0, None, 0.0) == 50.0
 
 
 def test_outro_window_gives_up_when_vocal_all_the_way_back() -> None:

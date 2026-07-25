@@ -518,6 +518,48 @@ def mixable_outro_window(path: Path, duration_seconds: float | None) -> tuple[fl
     return mixable_outro_window_from_energies(energy_envelope(pcm), ratios)
 
 
+def beat_aligned_start_seconds(
+    baseline_start_seconds: float,
+    track_bpm: float | None,
+    track_first_beat_seconds: float,
+    next_bpm: float | None,
+    next_first_beat_seconds: float,
+) -> float:
+    """Nudge a crossfade start time so the two tracks' beat grids land in
+    phase, instead of cutting at a blind, beat-unaware time offset.
+
+    This is a best effort, not real beatmatching: the app does not time
+    stretch or pitch shift the source audio, so it only fine-tunes the
+    trigger point by up to half a beat using the BPM and first-beat data
+    already computed for both tracks. When the two tempos are not
+    identical the grids will drift apart over the length of the
+    crossfade, but starting the blend in phase is what makes that
+    drift read as a beat later rather than as a clash right away.
+    """
+    if not track_bpm or not next_bpm or baseline_start_seconds <= 0:
+        return baseline_start_seconds
+
+    period = 60.0 / track_bpm
+    if period <= 0:
+        return baseline_start_seconds
+
+    # Where the incoming track's first beat would need to fall, relative to
+    # the outgoing track's own beat grid, for the two to land in phase.
+    target_phase = (track_first_beat_seconds - next_first_beat_seconds) % period
+    baseline_phase = (baseline_start_seconds - track_first_beat_seconds) % period
+    offset = target_phase - baseline_phase
+
+    # Only fine-tune the timing: never shift the crossfade by more than
+    # half a beat in either direction.
+    half_period = period / 2.0
+    if offset > half_period:
+        offset -= period
+    elif offset < -half_period:
+        offset += period
+
+    return max(0.0, baseline_start_seconds + offset)
+
+
 def first_beat_seconds_from_energies(energies: list[float]) -> float:
     if not energies:
         return 0.0

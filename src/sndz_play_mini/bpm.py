@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from array import array
 import os
 import math
+import re
 from pathlib import Path
 from typing import Callable
 
@@ -27,14 +28,48 @@ MAX_ANALYSIS_SECONDS = 120
 INTRO_ANALYSIS_SECONDS = 32
 OUTRO_ANALYSIS_SECONDS = 32
 MIX_SECONDS = 8.0
-MAX_MIX_SECONDS = 28.0
+# Mix windows are scanned in 4-second steps starting at MIX_SECONDS (see
+# mixable_region_seconds_from_energies), so MAX_MIX_SECONDS must stay on
+# that 8, 12, 16, ... grid or the scan will silently undershoot it.
+MAX_MIX_SECONDS = 12.0
+MID_MIX_SECONDS = 10.0
+SHORT_LONG_MIX_SECONDS = 9.0
 MIN_MIX_DURATION_SECONDS = 24.0
 NO_TRANSITION_SECONDS = 0.0
+# When no real mix window is offered (short track, no clean outro/intro,
+# vocal-heavy region...), the player still starts the next track a fraction
+# of a second early. This is not a mix: it only exists to absorb the OS-level
+# process-spawn latency of launching the next ffplay/afplay process, so the
+# switch does not read as a beat of silence between tracks.
+GAPLESS_PREROLL_SECONDS = 0.35
 EQ_LOW_CUT_HZ = 35
 EQ_HIGH_CUT_HZ = 18000
+# Rough vocal-presence gate for the crossfade window: a region is only
+# offered up as "mixable" if it is not dominated by energy in the band
+# where lead vocals sit. This does not detect vocals as such (that would
+# need real source separation), it only measures how much of a segment's
+# energy falls in the vocal formant range versus the full-band signal.
+# A sustained high ratio there is a decent proxy for "someone is singing
+# through most of this", which is exactly the region a crossfade should
+# avoid so two vocal lines do not overlap.
+VOCAL_BAND_HIGHPASS_HZ = 300
+VOCAL_BAND_LOWPASS_HZ = 3400
+VOCAL_BAND_FILTERS = [f"highpass=f={VOCAL_BAND_HIGHPASS_HZ}", f"lowpass=f={VOCAL_BAND_LOWPASS_HZ}"]
+VOCAL_PRESENCE_RATIO_LIMIT = 0.52
 LOUDNESS_TARGET_LUFS = -16
 LOUDNESS_TRUE_PEAK_DB = -1.5
 LOUDNESS_RANGE_LU = 9
+FILENAME_BPM_PATTERN = re.compile(r"\[(\d{2,3}(?:[.,]\d+)?)\s*BPM\]", re.IGNORECASE)
+TRAILING_DUPLICATE_PATTERN = re.compile(r"(?:[_\-\s]+(?:copy|copie))?(?:[_\-\s]+0?\d{1,3})$")
+# Conservative markers for "same file, downloaded twice": a zero-padded
+# auto-numbered suffix ("_02", "_03", ...) or a Finder/browser copy marker
+# ("copy", "copie", "(1)", "(2)", ...). Deliberately narrower than
+# TRAILING_DUPLICATE_PATTERN (which also strips real track numbers such as
+# "Track 1") because this pattern feeds a hard exclusion, not a soft
+# no-repeat hint: a false match here silently removes a track forever.
+STRICT_DUPLICATE_SUFFIX_PATTERN = re.compile(r"(?:[_\-\s]+(?:copy|copie))?(?:[_\-\s]+0[0-9])$", re.IGNORECASE)
+STRICT_DUPLICATE_PAREN_PATTERN = re.compile(r"\s*\(\d+\)$")
+DUPLICATE_DURATION_TOLERANCE_SECONDS = 2.0
 PITCH_CLASSES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 MAJOR_PROFILE = (6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88)
 MINOR_PROFILE = (6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17)
@@ -140,27 +175,16 @@ def decode_audio_pcm(
     path: Path,
     max_seconds: int = MAX_ANALYSIS_SECONDS,
     start_seconds: float = 0.0,
+    filters: list[str] | None = None,
 ) -> bytes:
     ffmpeg = require_tool("ffmpeg")
     command = [ffmpeg, "-nostdin", "-v", "error"]
     if start_seconds > 0:
         command.extend(["-ss", f"{start_seconds:.3f}"])
-    command.extend(
-        [
-            "-i",
-            str(path),
-            "-t",
-            str(max_seconds),
-            "-vn",
-            "-ac",
-            "1",
-            "-ar",
-            str(SAMPLE_RATE),
-            "-f",
-            "s16le",
-            "pipe:1",
-        ]
-    )
+    command.extend(["-i", str(path), "-t", str(max_seconds), "-vn"])
+    if filters:
+        command.extend(["-af", ",".join(filters)])
+    command.extend(["-ac", "1", "-ar", str(SAMPLE_RATE), "-f", "s16le", "pipe:1"])
     result = subprocess.run(command, capture_output=True, check=False)
     if result.returncode != 0 or not result.stdout:
         details = result.stderr.decode("utf-8", errors="ignore").strip()
@@ -168,7 +192,7 @@ def decode_audio_pcm(
     return result.stdout
 
 
-def energy_envelope(pcm: bytes) -> list[float]:
+def raw_rms_envelope(pcm: bytes) -> list[float]:
     window_bytes = WINDOW_SAMPLES * 2
     hop_bytes = HOP_SAMPLES * 2
     if len(pcm) < window_bytes * 8:
@@ -177,11 +201,45 @@ def energy_envelope(pcm: bytes) -> list[float]:
     values: list[float] = []
     for offset in range(0, len(pcm) - window_bytes, hop_bytes):
         values.append(float(audioop.rms(pcm[offset : offset + window_bytes], 2)))
+    return values
 
+
+def energy_envelope(pcm: bytes) -> list[float]:
+    values = raw_rms_envelope(pcm)
     peak = max(values, default=0.0)
     if peak <= 0:
         return []
     return [value / peak for value in values]
+
+
+def vocal_band_ratio_envelope(full_pcm: bytes, vocal_band_pcm: bytes) -> list[float]:
+    """Fraction of each frame's raw energy that falls in the vocal band.
+
+    Uses raw (non peak-normalized) RMS values on purpose: energy_envelope()
+    normalizes each signal against its own peak, which would make a ratio
+    between two independently-normalized series meaningless. A near-silent
+    frame is reported as 0.0 rather than left to a noisy division.
+    """
+    full_raw = raw_rms_envelope(full_pcm)
+    band_raw = raw_rms_envelope(vocal_band_pcm)
+    length = min(len(full_raw), len(band_raw))
+    ratios: list[float] = []
+    for index in range(length):
+        full_value = full_raw[index]
+        if full_value <= 1.0:
+            ratios.append(0.0)
+            continue
+        ratios.append(min(1.0, band_raw[index] / full_value))
+    return ratios
+
+
+def has_strong_vocal_presence(
+    ratios: list[float], *, ratio_limit: float = VOCAL_PRESENCE_RATIO_LIMIT
+) -> bool:
+    active = [ratio for ratio in ratios if ratio > 0]
+    if not active:
+        return False
+    return (sum(active) / len(active)) >= ratio_limit
 
 
 def onset_envelope(energies: list[float]) -> list[float]:
@@ -240,6 +298,99 @@ def normalize_bpm_to_range(
     return round(value, 2)
 
 
+def bpm_from_filename(path: Path) -> float | None:
+    match = FILENAME_BPM_PATTERN.search(path.stem)
+    if not match:
+        return None
+    try:
+        bpm = float(match.group(1).replace(",", "."))
+    except ValueError:
+        return None
+    return normalize_bpm_to_range(bpm)
+
+
+def title_cycle_key_from_path(path: Path) -> str:
+    stem = FILENAME_BPM_PATTERN.sub("", path.stem)
+    stem = re.sub(r"[_\-\s]+", "_", stem).strip("_ ")
+    stem = TRAILING_DUPLICATE_PATTERN.sub("", stem).strip("_ ")
+    return stem.casefold() or path.name.casefold()
+
+
+def strict_duplicate_key_from_path(path: Path) -> str:
+    stem = FILENAME_BPM_PATTERN.sub("", path.stem)
+    stem = STRICT_DUPLICATE_PAREN_PATTERN.sub("", stem)
+    stem = STRICT_DUPLICATE_SUFFIX_PATTERN.sub("", stem)
+    stem = re.sub(r"[_\-\s]+", " ", stem).strip()
+    return stem.casefold() or path.name.casefold()
+
+
+def deduplicate_tracks(
+    tracks: list[SonoTrack],
+    *,
+    duration_tolerance_seconds: float = DUPLICATE_DURATION_TOLERANCE_SECONDS,
+) -> tuple[list[SonoTrack], list[tuple[SonoTrack, SonoTrack]]]:
+    """Drop tracks that are the same sound saved twice under different names.
+
+    Two tracks only count as duplicates when BOTH conditions hold: their
+    filenames collapse to the same strict duplicate key (same title, only
+    differing by an auto-numbered/copy suffix) AND their measured durations
+    are within `duration_tolerance_seconds` of each other. Title alone is
+    not enough, since two different songs can share a title fragment; this
+    keeps the exclusion safe from false positives that would otherwise
+    permanently hide a real, distinct track.
+
+    Returns the surviving tracks (best quality per group, by file size) and
+    the list of (kept, dropped) pairs for logging/reporting.
+    """
+    groups: dict[str, list[SonoTrack]] = {}
+    for track in tracks:
+        key = strict_duplicate_key_from_path(track.path)
+        groups.setdefault(key, []).append(track)
+
+    kept: list[SonoTrack] = []
+    removed: list[tuple[SonoTrack, SonoTrack]] = []
+
+    for candidates in groups.values():
+        remaining = list(candidates)
+        while remaining:
+            anchor = remaining.pop(0)
+            cluster = [anchor]
+            still_remaining: list[SonoTrack] = []
+            for other in remaining:
+                if (
+                    anchor.duration_seconds is not None
+                    and other.duration_seconds is not None
+                    and abs(anchor.duration_seconds - other.duration_seconds) <= duration_tolerance_seconds
+                ):
+                    cluster.append(other)
+                else:
+                    still_remaining.append(other)
+            remaining = still_remaining
+
+            if len(cluster) == 1:
+                kept.append(cluster[0])
+                continue
+
+            def _quality(track: SonoTrack) -> int:
+                try:
+                    return track.path.stat().st_size
+                except OSError:
+                    return 0
+
+            best = max(cluster, key=_quality)
+            kept.append(best)
+            removed.extend((best, track) for track in cluster if track is not best)
+
+    return sort_tracks_by_bpm(kept), removed
+
+
+def display_title_from_path(path: Path) -> str:
+    stem = FILENAME_BPM_PATTERN.sub("", path.stem)
+    stem = re.sub(r"[_\-\s]+", " ", stem).strip()
+    stem = TRAILING_DUPLICATE_PATTERN.sub("", stem).strip()
+    return stem.upper() or path.name.upper()
+
+
 def is_mixable_intro_from_energies(energies: list[float]) -> bool:
     if len(energies) < 12:
         return False
@@ -250,7 +401,12 @@ def is_mixable_intro_from_energies(energies: list[float]) -> bool:
     return active_ratio >= 0.35 and mean_energy >= 0.08 and peak_energy >= 0.22
 
 
-def mixable_region_seconds_from_energies(energies: list[float], *, from_start: bool = True) -> float:
+def mixable_region_seconds_from_energies(
+    energies: list[float],
+    *,
+    from_start: bool = True,
+    vocal_ratios: list[float] | None = None,
+) -> float:
     if not energies:
         return 0.0
     best = 0.0
@@ -258,9 +414,27 @@ def mixable_region_seconds_from_energies(energies: list[float], *, from_start: b
     for seconds in range(int(MIX_SECONDS), max_seconds + 1, 4):
         frame_count = max(12, int(seconds / ENERGY_FRAME_SECONDS))
         candidate = energies[:frame_count] if from_start else energies[-frame_count:]
-        if is_mixable_intro_from_energies(candidate):
-            best = float(seconds)
+        if not is_mixable_intro_from_energies(candidate):
+            continue
+        if vocal_ratios:
+            candidate_ratios = vocal_ratios[:frame_count] if from_start else vocal_ratios[-frame_count:]
+            if has_strong_vocal_presence(candidate_ratios):
+                continue
+        best = float(seconds)
     return best
+
+
+def _vocal_band_ratios_for(path: Path, max_seconds: int, start_seconds: float, full_pcm: bytes) -> list[float] | None:
+    # Best-effort: if the second ffmpeg decode (band-limited) fails for any
+    # reason, fall back to the plain energy-only mixable check rather than
+    # denying the crossfade outright.
+    try:
+        band_pcm = decode_audio_pcm(
+            path, max_seconds=max_seconds, start_seconds=start_seconds, filters=VOCAL_BAND_FILTERS
+        )
+    except SonoError:
+        return None
+    return vocal_band_ratio_envelope(full_pcm, band_pcm)
 
 
 def has_mixable_intro(path: Path) -> bool:
@@ -268,7 +442,10 @@ def has_mixable_intro(path: Path) -> bool:
         pcm = decode_audio_pcm(path, max_seconds=INTRO_ANALYSIS_SECONDS)
     except SonoError:
         return False
-    return is_mixable_intro_from_energies(energy_envelope(pcm))
+    if not is_mixable_intro_from_energies(energy_envelope(pcm)):
+        return False
+    ratios = _vocal_band_ratios_for(path, INTRO_ANALYSIS_SECONDS, 0.0, pcm)
+    return not (ratios and has_strong_vocal_presence(ratios))
 
 
 def mixable_intro_seconds(path: Path) -> float:
@@ -276,7 +453,8 @@ def mixable_intro_seconds(path: Path) -> float:
         pcm = decode_audio_pcm(path, max_seconds=INTRO_ANALYSIS_SECONDS)
     except SonoError:
         return 0.0
-    return mixable_region_seconds_from_energies(energy_envelope(pcm), from_start=True)
+    ratios = _vocal_band_ratios_for(path, INTRO_ANALYSIS_SECONDS, 0.0, pcm)
+    return mixable_region_seconds_from_energies(energy_envelope(pcm), from_start=True, vocal_ratios=ratios)
 
 
 def mixable_outro_seconds(path: Path, duration_seconds: float | None) -> float:
@@ -287,7 +465,8 @@ def mixable_outro_seconds(path: Path, duration_seconds: float | None) -> float:
         pcm = decode_audio_pcm(path, max_seconds=OUTRO_ANALYSIS_SECONDS, start_seconds=start_seconds)
     except SonoError:
         return 0.0
-    return mixable_region_seconds_from_energies(energy_envelope(pcm), from_start=False)
+    ratios = _vocal_band_ratios_for(path, OUTRO_ANALYSIS_SECONDS, start_seconds, pcm)
+    return mixable_region_seconds_from_energies(energy_envelope(pcm), from_start=False, vocal_ratios=ratios)
 
 
 def first_beat_seconds_from_energies(energies: list[float]) -> float:
@@ -425,8 +604,10 @@ def sort_tracks_by_bpm(tracks: list[SonoTrack]) -> list[SonoTrack]:
 
 
 def analyze_track(path: Path, estimator: Estimator = estimate_bpm) -> tuple[SonoTrack, str | None]:
+    bpm = bpm_from_filename(path)
     try:
-        bpm = estimator(path)
+        if bpm is None:
+            bpm = estimator(path)
         duration = probe_duration_seconds(path)
         key = estimate_key(path)
         first_beat = first_beat_seconds(path)
@@ -435,7 +616,6 @@ def analyze_track(path: Path, estimator: Estimator = estimate_bpm) -> tuple[Sono
         outro_seconds = mixable_outro_seconds(path, duration)
         error = None
     except SonoError as exc:
-        bpm = None
         duration = None
         key = ""
         first_beat = 0.0
@@ -482,4 +662,10 @@ def analyze_folder(
         if progress:
             progress(f"BPM {index}/{total}", int((index / total) * 100))
 
-    return sort_tracks_by_bpm(tracks), errors
+    deduplicated, removed_pairs = deduplicate_tracks(tracks)
+    for kept_track, dropped_track in removed_pairs:
+        errors.append(
+            f"{dropped_track.path.name}: duplicate of {kept_track.path.name}, skipped"
+        )
+
+    return deduplicated, errors

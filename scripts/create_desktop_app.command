@@ -1,18 +1,18 @@
 #!/bin/zsh
 set -e
 
-APP_NAME="${SNDZ_DESKTOP_APP_NAME:-SNDZ PLAY MINI}"
-BUNDLE_IDENTIFIER="${SNDZ_BUNDLE_IDENTIFIER:-com.rushoperator.sndzplaymini}"
+APP_NAME="${SONO_DESKTOP_APP_NAME:-SONO PLAY MINI}"
+BUNDLE_IDENTIFIER="${SONO_BUNDLE_IDENTIFIER:-com.rushoperator.sonoplaymini}"
 REPO_DIR="${0:A:h:h}"
 APP_DIR="$HOME/Desktop/$APP_NAME.app"
 
 mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
-ICON_SOURCE="$REPO_DIR/src/sndz_play_mini/assets/sndz_play_mini_logo.png"
-ICON_FILE="SNDZ_PLAY_MINI.png"
+ICON_SOURCE="$REPO_DIR/src/sndz_play_mini/assets/sono_play_mini_logo.png"
+ICON_FILE="SONO_PLAY_MINI.png"
 cp "$ICON_SOURCE" "$APP_DIR/Contents/Resources/$ICON_FILE"
 
 if command -v sips >/dev/null 2>&1 && command -v iconutil >/dev/null 2>&1; then
-  ICONSET="$APP_DIR/Contents/Resources/SNDZ_PLAY_MINI.iconset"
+  ICONSET="$APP_DIR/Contents/Resources/SONO_PLAY_MINI.iconset"
   mkdir -p "$ICONSET"
   sips -z 16 16 "$ICON_SOURCE" --out "$ICONSET/icon_16x16.png" >/dev/null
   sips -z 32 32 "$ICON_SOURCE" --out "$ICONSET/icon_16x16@2x.png" >/dev/null
@@ -24,8 +24,8 @@ if command -v sips >/dev/null 2>&1 && command -v iconutil >/dev/null 2>&1; then
   sips -z 512 512 "$ICON_SOURCE" --out "$ICONSET/icon_256x256@2x.png" >/dev/null
   sips -z 512 512 "$ICON_SOURCE" --out "$ICONSET/icon_512x512.png" >/dev/null
   sips -z 1024 1024 "$ICON_SOURCE" --out "$ICONSET/icon_512x512@2x.png" >/dev/null
-  iconutil -c icns "$ICONSET" -o "$APP_DIR/Contents/Resources/SNDZ_PLAY_MINI.icns"
-  ICON_FILE="SNDZ_PLAY_MINI.icns"
+  iconutil -c icns "$ICONSET" -o "$APP_DIR/Contents/Resources/SONO_PLAY_MINI.icns"
+  ICON_FILE="SONO_PLAY_MINI.icns"
 fi
 
 cat > "$APP_DIR/Contents/MacOS/$APP_NAME" <<SCRIPT

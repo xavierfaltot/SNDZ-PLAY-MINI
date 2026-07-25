@@ -1,7 +1,7 @@
 [project]
-name = "sndz-play-mini"
+name = "sono-play-mini"
 version = "2.0.0"
-description = "Minimal BPM-sorted local audio mini player for RUSH OPERATOR."
+description = "SONO PLAY MINI, a minimal BPM-sorted local audio mini player for RUSH OPERATOR."
 requires-python = ">=3.11"
 dependencies = [
   "PySide6-Essentials>=6.7",

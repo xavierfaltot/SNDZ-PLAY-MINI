@@ -7,8 +7,10 @@ from PySide6.QtCore import QProcess
 from PySide6.QtWidgets import QApplication, QLineEdit, QListWidget
 
 from sndz_play_mini.bpm import (
+    ENERGY_FRAME_SECONDS,
     GAPLESS_PREROLL_SECONDS,
     MAX_MIX_SECONDS,
+    OUTRO_MAX_TAIL_TRIM_SECONDS,
     SHORT_LONG_MIX_SECONDS,
     SonoTrack,
     analyze_folder,
@@ -22,6 +24,7 @@ from sndz_play_mini.bpm import (
     first_beat_seconds_from_energies,
     has_strong_vocal_presence,
     is_mixable_intro_from_energies,
+    mixable_outro_window_from_energies,
     mixable_region_seconds_from_energies,
     NO_TRANSITION_SECONDS,
     normalize_bpm_to_range,
@@ -117,6 +120,35 @@ def test_mixable_intro_energy_gate() -> None:
 def test_measures_long_mixable_regions() -> None:
     assert mixable_region_seconds_from_energies([0.3] * 700) == MAX_MIX_SECONDS
     assert mixable_region_seconds_from_energies([0.0] * 700) == 0.0
+
+
+def test_outro_window_backs_off_from_a_short_vocal_tail() -> None:
+    # Regression test for a long singing outro blocking mixing outright: a
+    # vocal tail at the very end must no longer zero out the whole outro.
+    # If a clean instrumental handle exists a bit earlier, the search backs
+    # off to find it instead of giving up.
+    frame_count = 700  # far more than the outro analysis window needs
+    energies = [0.3] * frame_count
+    tail_frames = int(13.0 / ENERGY_FRAME_SECONDS)  # ~13s of singing at the very end
+    vocal_ratios = [0.1] * (frame_count - tail_frames) + [0.9] * tail_frames
+
+    mix_seconds, trim_seconds = mixable_outro_window_from_energies(energies, vocal_ratios)
+
+    assert mix_seconds > 0
+    assert 0.0 < trim_seconds <= OUTRO_MAX_TAIL_TRIM_SECONDS
+
+
+def test_outro_window_gives_up_when_vocal_all_the_way_back() -> None:
+    # If there is no instrumental handle anywhere within the searchable
+    # range, the outro must still come back as unmixable (0.0) rather than
+    # mixing straight into the vocals.
+    energies = [0.3] * 700
+    vocal_ratios = [0.9] * 700
+
+    mix_seconds, trim_seconds = mixable_outro_window_from_energies(energies, vocal_ratios)
+
+    assert mix_seconds == 0.0
+    assert trim_seconds == 0.0
 
 
 def _constant_pcm(amplitude: int, sample_count: int) -> bytes:

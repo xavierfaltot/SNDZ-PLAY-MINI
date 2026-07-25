@@ -20,6 +20,7 @@ The app stays intentionally small:
 - adaptive crossfade, armed off the player's actual start signal (not a guessed timer) to keep the transition on time
 - at most two tracks ever play at once: starting a new track always cuts anything older than the one it is crossfading with
 - vocal-band gate on the crossfade: intro/outro regions dominated by energy in the ~300-3400Hz vocal range are never offered up for mixing, so two vocal lines don't overlap
+- when the very ending of a track is vocal, the outro search backs off to find an instrumental handle a bit earlier instead of cancelling the mix outright; the vocal tail past that handle is cut once the next track takes over rather than played out underneath it
 - gapless preroll when no real mix is offered: the next track still starts a third of a second early, just enough to absorb process-launch latency, so there is no silent gap between tracks
 - smart playback EQ and loudness matching when `ffplay` is available
 - LED-style now-playing screen under PLAY/NEXT showing the track title only, nothing else

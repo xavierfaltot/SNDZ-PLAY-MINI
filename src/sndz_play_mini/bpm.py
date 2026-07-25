@@ -56,6 +56,14 @@ VOCAL_BAND_HIGHPASS_HZ = 300
 VOCAL_BAND_LOWPASS_HZ = 3400
 VOCAL_BAND_FILTERS = [f"highpass=f={VOCAL_BAND_HIGHPASS_HZ}", f"lowpass=f={VOCAL_BAND_LOWPASS_HZ}"]
 VOCAL_PRESENCE_RATIO_LIMIT = 0.52
+# A long vocal tail at the very end of a track must no longer block mixing
+# outright. If the literal last seconds are vocal, the outro search looks a
+# little further back for an instrumental handle instead of giving up; when
+# it finds one, the crossfade starts there and the vocal tail past it is
+# simply cut once the next track takes over, rather than played out
+# underneath it or forcing a silent hard cut.
+OUTRO_TAIL_TRIM_STEP_SECONDS = 2.0
+OUTRO_MAX_TAIL_TRIM_SECONDS = 20.0
 LOUDNESS_TARGET_LUFS = -16
 LOUDNESS_TRUE_PEAK_DB = -1.5
 LOUDNESS_RANGE_LU = 9
@@ -107,6 +115,7 @@ class SonoTrack:
     mixable_intro: bool = False
     mixable_intro_seconds: float = 0.0
     mixable_outro_seconds: float = 0.0
+    outro_tail_trim_seconds: float = 0.0
 
 
 Estimator = Callable[[Path], float | None]
@@ -424,6 +433,42 @@ def mixable_region_seconds_from_energies(
     return best
 
 
+def mixable_outro_window_from_energies(
+    energies: list[float],
+    vocal_ratios: list[float] | None,
+) -> tuple[float, float]:
+    """Search for a usable outro handle, backing off from the literal end.
+
+    Returns (mix_seconds, tail_trim_seconds). tail_trim_seconds is how many
+    seconds at the very end of the track have to be skipped, because they
+    are vocal, to reach a clean instrumental handle. The search starts at
+    the true end (trim 0) and only backs off as far as needed: the first
+    trim that unlocks a usable window wins, so we cut as little of the
+    track's real ending as possible.
+    """
+    if not energies:
+        return 0.0, 0.0
+
+    trim_step_frames = max(1, round(OUTRO_TAIL_TRIM_STEP_SECONDS / ENERGY_FRAME_SECONDS))
+    max_trim_frames = int(OUTRO_MAX_TAIL_TRIM_SECONDS / ENERGY_FRAME_SECONDS)
+
+    trim_frames = 0
+    while trim_frames <= max_trim_frames:
+        remaining = len(energies) - trim_frames
+        if remaining < 12:
+            break
+        energies_slice = energies[:remaining]
+        ratios_slice = vocal_ratios[:remaining] if vocal_ratios else None
+        mix_seconds = mixable_region_seconds_from_energies(
+            energies_slice, from_start=False, vocal_ratios=ratios_slice
+        )
+        if mix_seconds > 0:
+            return mix_seconds, round(trim_frames * ENERGY_FRAME_SECONDS, 3)
+        trim_frames += trim_step_frames
+
+    return 0.0, 0.0
+
+
 def _vocal_band_ratios_for(path: Path, max_seconds: int, start_seconds: float, full_pcm: bytes) -> list[float] | None:
     # Best-effort: if the second ffmpeg decode (band-limited) fails for any
     # reason, fall back to the plain energy-only mixable check rather than
@@ -457,16 +502,20 @@ def mixable_intro_seconds(path: Path) -> float:
     return mixable_region_seconds_from_energies(energy_envelope(pcm), from_start=True, vocal_ratios=ratios)
 
 
-def mixable_outro_seconds(path: Path, duration_seconds: float | None) -> float:
+def mixable_outro_window(path: Path, duration_seconds: float | None) -> tuple[float, float]:
+    """Returns (mix_seconds, tail_trim_seconds) for the track's outro.
+
+    See mixable_outro_window_from_energies for what tail_trim_seconds means.
+    """
     if not duration_seconds or duration_seconds <= MIX_SECONDS:
-        return 0.0
+        return 0.0, 0.0
     start_seconds = max(0.0, duration_seconds - OUTRO_ANALYSIS_SECONDS)
     try:
         pcm = decode_audio_pcm(path, max_seconds=OUTRO_ANALYSIS_SECONDS, start_seconds=start_seconds)
     except SonoError:
-        return 0.0
+        return 0.0, 0.0
     ratios = _vocal_band_ratios_for(path, OUTRO_ANALYSIS_SECONDS, start_seconds, pcm)
-    return mixable_region_seconds_from_energies(energy_envelope(pcm), from_start=False, vocal_ratios=ratios)
+    return mixable_outro_window_from_energies(energy_envelope(pcm), ratios)
 
 
 def first_beat_seconds_from_energies(energies: list[float]) -> float:
@@ -613,7 +662,7 @@ def analyze_track(path: Path, estimator: Estimator = estimate_bpm) -> tuple[Sono
         first_beat = first_beat_seconds(path)
         variable_tempo = detect_variable_tempo(path, bpm, duration)
         intro_seconds = mixable_intro_seconds(path)
-        outro_seconds = mixable_outro_seconds(path, duration)
+        outro_seconds, outro_tail_trim = mixable_outro_window(path, duration)
         error = None
     except SonoError as exc:
         duration = None
@@ -622,6 +671,7 @@ def analyze_track(path: Path, estimator: Estimator = estimate_bpm) -> tuple[Sono
         variable_tempo = False
         intro_seconds = 0.0
         outro_seconds = 0.0
+        outro_tail_trim = 0.0
         error = f"{path.name}: {exc}"
 
     return (
@@ -635,6 +685,7 @@ def analyze_track(path: Path, estimator: Estimator = estimate_bpm) -> tuple[Sono
             mixable_intro=intro_seconds >= MIX_SECONDS,
             mixable_intro_seconds=intro_seconds,
             mixable_outro_seconds=outro_seconds,
+            outro_tail_trim_seconds=outro_tail_trim,
         ),
         error,
     )

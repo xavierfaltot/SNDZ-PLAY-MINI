@@ -561,6 +561,14 @@ class SonoWindow(QMainWindow):
         self._mark_track_played(track)
         mix_seconds = self._transition_mix_seconds(track)
         fade_out = mix_seconds > 0
+        # When the outro handle used for this crossfade is not the literal
+        # end of the file (outro_tail_trim_seconds > 0: the true ending is
+        # vocal, so the handle sits a bit earlier), the track must stop at
+        # the handle instead of playing its vocal tail out underneath the
+        # next one.
+        effective_duration = track.duration_seconds
+        if fade_out and track.duration_seconds and track.outro_tail_trim_seconds:
+            effective_duration = track.duration_seconds - track.outro_tail_trim_seconds
         self._sync_transport_buttons(playing=True)
         self._set_status(f"PLAY {self.play_index + 1}/{len(self.tracks)}")
         self.current_title.setText(self._track_display_text(track))
@@ -592,9 +600,9 @@ class SonoWindow(QMainWindow):
         # dominant source of drift.
         fade_in_seconds_for_this_track = self.next_fade_in_seconds if fade_in else mix_seconds
         self.mix_timer.stop()
-        if fade_out and track.duration_seconds:
+        if fade_out and effective_duration:
             self.next_fade_in_seconds = mix_seconds
-            delay_ms = max(1, int((track.duration_seconds - mix_seconds) * 1000))
+            delay_ms = max(1, int((effective_duration - mix_seconds) * 1000))
             player.started.connect(
                 lambda process=player, delay=delay_ms: self._arm_mix_timer(process, delay)
             )
@@ -623,6 +631,9 @@ class SonoWindow(QMainWindow):
                 fade_in=fade_in,
                 fade_out=fade_out,
                 mix_seconds=fade_in_seconds_for_this_track,
+                duration_limit_seconds=(
+                    effective_duration if (fade_out and track.outro_tail_trim_seconds) else None
+                ),
             ),
         )
 
@@ -643,8 +654,11 @@ class SonoWindow(QMainWindow):
         if next_track.mixable_intro_seconds < MIX_SECONDS:
             return NO_TRANSITION_SECONDS
 
-        outro_seconds = track.mixable_outro_seconds if track.mixable_outro_seconds >= MIX_SECONDS else MIX_SECONDS
-        available_seconds = min(outro_seconds, next_track.mixable_intro_seconds, MAX_MIX_SECONDS)
+        # No artificial floor here: a genuinely empty outro (no instrumental
+        # handle found even after backing off from a vocal tail, see
+        # outro_tail_trim_seconds) must be able to fall all the way to 0 and
+        # deny the mix, otherwise this would quietly override the vocal gate.
+        available_seconds = min(track.mixable_outro_seconds, next_track.mixable_intro_seconds, MAX_MIX_SECONDS)
         if available_seconds < MIX_SECONDS:
             return NO_TRANSITION_SECONDS
 
@@ -668,6 +682,7 @@ class SonoWindow(QMainWindow):
         fade_in: bool,
         fade_out: bool,
         mix_seconds: float,
+        duration_limit_seconds: float | None = None,
     ) -> list[str]:
         if Path(self.player_tool).name == "afplay":
             return [str(track.path)]
@@ -677,10 +692,17 @@ class SonoWindow(QMainWindow):
         if fade_in:
             filters.append(f"afade=t=in:st=0:d={mix_seconds:g}")
         if fade_out and track.duration_seconds:
-            start = max(0.0, track.duration_seconds - mix_seconds)
+            end_seconds = duration_limit_seconds or track.duration_seconds
+            start = max(0.0, end_seconds - mix_seconds)
             filters.append(f"afade=t=out:st={start:.3f}:d={mix_seconds:g}")
         if filters:
             args.extend(["-af", ",".join(filters)])
+        if duration_limit_seconds:
+            # The real ending of this track is a vocal tail past its usable
+            # outro handle (outro_tail_trim_seconds). Stop exactly where the
+            # handle ends instead of playing that tail out underneath the
+            # next track.
+            args.extend(["-t", f"{duration_limit_seconds:.3f}"])
         args.append(str(track.path))
         return args
 

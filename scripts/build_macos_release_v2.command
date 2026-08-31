@@ -44,6 +44,9 @@ FFPLAY="$(command -v ffplay)"
   --windowed \
   --name "$APP_NAME" \
   --osx-bundle-identifier "com.faltot.sonoplaymini" \
+  --paths "$ROOT/src" \
+  --collect-submodules sndz_play_mini \
+  --hidden-import sndz_play_mini.global_bpm \
   --add-data="$ICON_PNG:sndz_play_mini/assets" \
   --add-binary="$FFMPEG:." \
   --add-binary="$FFPROBE:." \

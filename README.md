@@ -2,6 +2,10 @@
 
 SONO PLAY MINI is a tiny desktop audio player for local sound folders.
 
+## Download for macOS
+
+**[DOWNLOAD SONO PLAY MINI for macOS](https://toutvabiensepasser.com/SONO-PLAY-MINI-macOS.dmg)**
+
 Click the logo, choose a folder, then the app analyzes local audio tempo immediately. Press the play icon to play the list from lowest BPM to highest BPM, so the energy climbs. Playback always starts from the calmest track. Press next to jump forward. While playing, drop audio files on the logo: the first dropped file becomes the next track, and the other dropped files are analyzed and diluted into the BPM flow.
 
 The app stays intentionally small:
@@ -56,6 +60,12 @@ SONO PLAY MINI.command
 ```
 
 ## macOS Desktop App
+
+Download the ready-to-use macOS disk image:
+
+**[SONO-PLAY-MINI-macOS.dmg](https://toutvabiensepasser.com/SONO-PLAY-MINI-macOS.dmg)**
+
+To build the desktop app from source:
 
 ```bash
 ./scripts/create_desktop_app.command

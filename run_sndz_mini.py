@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Launch SONO PLAY MINI from the source checkout."""
+"""Launch SONO PLAY MINI from the source checkout or frozen macOS app."""
 
 from pathlib import Path
 import sys
@@ -16,7 +16,23 @@ from sndz_play_mini.global_bpm import install as install_global_bpm  # noqa: E40
 
 install_global_bpm()
 
-from sndz_play_mini.ui import main  # noqa: E402
+from PySide6.QtGui import QIcon  # noqa: E402
+from PySide6.QtWidgets import QApplication  # noqa: E402
+from sndz_play_mini.ui import APP_NAME, LOGO_PATH, SonoWindow  # noqa: E402
+
+
+def main() -> int:
+    app = QApplication(sys.argv)
+    app.setApplicationName(APP_NAME)
+    app.setOrganizationName("RUSH OPERATOR")
+    if LOGO_PATH.exists():
+        app.setWindowIcon(QIcon(str(LOGO_PATH)))
+
+    window = SonoWindow()
+    # SONO PLAY MINI is an instrument, not a desktop utility window: launch
+    # directly into the minimal black full-screen interface.
+    window.showFullScreen()
+    return app.exec()
 
 
 if __name__ == "__main__":

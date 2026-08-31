@@ -69,6 +69,7 @@ FFPLAY="$(command -v ffplay)"
   --collect-submodules sndz_play_mini \
   --collect-data sndz_play_mini \
   --hidden-import sndz_play_mini.global_bpm \
+  --add-data="$ICON_PNG:sndz_play_mini/assets" \
   --add-binary="$FFMPEG:." \
   --add-binary="$FFPROBE:." \
   --add-binary="$FFPLAY:." \
@@ -79,6 +80,15 @@ if [ ! -d "$APP" ]; then
   echo "ERROR: PyInstaller did not create $APP"
   exit 1
 fi
+
+# Fail the build if the UI logo was not actually bundled.
+if ! find "$APP" -name "sono_play_mini_logo.png" -print -quit | grep -q .; then
+  echo "ERROR: SONO PLAY MINI logo was not bundled in the app."
+  exit 1
+fi
+
+echo "Bundled logo:"
+find "$APP" -name "sono_play_mini_logo.png" -print
 
 codesign --force --deep --sign - "$APP"
 
@@ -101,6 +111,6 @@ echo "DONE"
 echo "DMG: $ROOT/$DMG"
 echo "SHA256: $SHA"
 echo ""
-echo "The app now bundles the SONO PLAY MINI logo and uses it as the macOS app icon."
+echo "The app bundles the SONO PLAY MINI logo explicitly and uses it as the macOS app icon."
 echo "Test the DMG on another Mac before publishing it."
 echo "For a zero-warning public install, sign with an Apple Developer ID and notarize the app."

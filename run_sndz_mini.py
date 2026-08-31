@@ -18,19 +18,64 @@ install_global_bpm()
 
 from PySide6.QtGui import QIcon  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
-from sndz_play_mini.ui import APP_NAME, LOGO_PATH, SonoWindow  # noqa: E402
+import sndz_play_mini.ui as ui  # noqa: E402
+
+
+def _logo_path() -> Path:
+    """Return the SONO logo path both from source and from PyInstaller."""
+    candidates: list[Path] = []
+
+    # PyInstaller extracts collected package data under sys._MEIPASS.
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        frozen_root = Path(meipass)
+        candidates.extend(
+            [
+                frozen_root / "sndz_play_mini" / "assets" / "sono_play_mini_logo.png",
+                frozen_root / "assets" / "sono_play_mini_logo.png",
+                frozen_root / "sono_play_mini_logo.png",
+            ]
+        )
+
+    # Normal source checkout.
+    candidates.extend(
+        [
+            ROOT / "src" / "sndz_play_mini" / "assets" / "sono_play_mini_logo.png",
+            Path(ui.__file__).resolve().parent / "assets" / "sono_play_mini_logo.png",
+        ]
+    )
+
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+
+    # Keep a deterministic path so the UI can fall back cleanly if an asset
+    # is genuinely missing.
+    return candidates[0]
 
 
 def main() -> int:
     app = QApplication(sys.argv)
-    app.setApplicationName(APP_NAME)
+    app.setApplicationName(ui.APP_NAME)
     app.setOrganizationName("RUSH OPERATOR")
-    if LOGO_PATH.exists():
-        app.setWindowIcon(QIcon(str(LOGO_PATH)))
 
-    window = SonoWindow()
-    # SONO PLAY MINI is an instrument, not a desktop utility window: launch
-    # directly into the minimal black full-screen interface.
+    # Use the real packaged image instead of the SONO/PLAY/MINI text fallback.
+    logo_path = _logo_path()
+    ui.LOGO_PATH = logo_path
+
+    # Full screen stays black, but the instrument itself remains MINI and
+    # centered instead of scaling visually to fill the display.
+    ui.TILE_SIZE = 145
+    ui.CONTROL_GAP = 8
+    ui.PANEL_WIDTH = ui.TILE_SIZE * 2 + ui.CONTROL_GAP + 18
+    ui.PANEL_HEIGHT = 390
+    ui.WINDOW_WIDTH = 340
+    ui.WINDOW_HEIGHT = 430
+
+    if logo_path.exists():
+        app.setWindowIcon(QIcon(str(logo_path)))
+
+    window = ui.SonoWindow()
     window.showFullScreen()
     return app.exec()
 

@@ -22,7 +22,6 @@ fi
 
 if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v ffprobe >/dev/null 2>&1 || ! command -v ffplay >/dev/null 2>&1; then
   echo "ERROR: ffmpeg, ffprobe and ffplay are required to build the standalone app."
-  echo "Install FFmpeg first (for example with Homebrew: brew install ffmpeg), then run this script again."
   exit 1
 fi
 
@@ -41,7 +40,6 @@ fi
 rm -rf build dist release "$ICONSET" "$ICON_ICNS"
 mkdir -p release "$ICONSET"
 
-# Build a native macOS .icns from the exact SONO PLAY MINI logo used in-app.
 sips -z 16 16 "$ICON_PNG" --out "$ICONSET/icon_16x16.png" >/dev/null
 sips -z 32 32 "$ICON_PNG" --out "$ICONSET/icon_16x16@2x.png" >/dev/null
 sips -z 32 32 "$ICON_PNG" --out "$ICONSET/icon_32x32.png" >/dev/null
@@ -67,9 +65,7 @@ FFPLAY="$(command -v ffplay)"
   --icon "$ICON_ICNS" \
   --paths "$ROOT/src" \
   --collect-submodules sndz_play_mini \
-  --collect-data sndz_play_mini \
   --hidden-import sndz_play_mini.global_bpm \
-  --add-data="$ICON_PNG:sndz_play_mini/assets" \
   --add-binary="$FFMPEG:." \
   --add-binary="$FFPROBE:." \
   --add-binary="$FFPLAY:." \
@@ -81,14 +77,16 @@ if [ ! -d "$APP" ]; then
   exit 1
 fi
 
-# Fail the build if the UI logo was not actually bundled.
-if ! find "$APP" -name "sono_play_mini_logo.png" -print -quit | grep -q .; then
-  echo "ERROR: SONO PLAY MINI logo was not bundled in the app."
+# Put the UI logo in a deterministic macOS bundle location.
+mkdir -p "$APP/Contents/Resources"
+cp "$ICON_PNG" "$APP/Contents/Resources/sono_play_mini_logo.png"
+
+if [ ! -f "$APP/Contents/Resources/sono_play_mini_logo.png" ]; then
+  echo "ERROR: SONO PLAY MINI logo copy failed."
   exit 1
 fi
 
-echo "Bundled logo:"
-find "$APP" -name "sono_play_mini_logo.png" -print
+echo "Bundled logo: $APP/Contents/Resources/sono_play_mini_logo.png"
 
 codesign --force --deep --sign - "$APP"
 
@@ -110,7 +108,3 @@ echo ""
 echo "DONE"
 echo "DMG: $ROOT/$DMG"
 echo "SHA256: $SHA"
-echo ""
-echo "The app bundles the SONO PLAY MINI logo explicitly and uses it as the macOS app icon."
-echo "Test the DMG on another Mac before publishing it."
-echo "For a zero-warning public install, sign with an Apple Developer ID and notarize the app."

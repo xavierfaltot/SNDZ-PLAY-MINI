@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SONO PLAY MINI — Browser</title>
+<meta name="description" content="SONO PLAY MINI — smart browser music player. Drop a folder, analyze BPM, play from low to high energy.">
+<style>
+:root{--bg:#060606;--panel:#d9d1bf;--ink:#111;--red:#c22922;--amber:#ffb000;--line:#2b2925;--muted:#8f887b}
+*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:#e8e1d4;font-family:Arial,Helvetica,sans-serif}body{min-height:100vh;padding:32px 18px}.app{max-width:980px;margin:0 auto}.top{display:flex;justify-content:space-between;align-items:flex-end;gap:20px;margin-bottom:24px}.brand{font-size:14px;font-weight:900;letter-spacing:.15em}.tag{font-size:11px;color:#817b70;letter-spacing:.09em;text-align:right}.machine{display:grid;grid-template-columns:minmax(280px,380px) 1fr;gap:24px;align-items:start}.left,.right{min-width:0}.logo{display:grid;grid-template-columns:repeat(4,1fr);width:min(100%,380px);aspect-ratio:1/1;margin:0 auto 18px;background:#000;gap:2px}.tile{background:var(--panel);color:var(--ink);display:flex;align-items:center;justify-content:center;font-size:clamp(30px,5vw,66px);font-weight:1000;line-height:1}.tile.play{background:var(--red);color:#070707}.controls{display:grid;grid-template-columns:1fr 1fr;gap:10px}.ctrl{min-height:88px;background:#11100f;border:2px solid #39342e;color:var(--red);font-size:36px;font-weight:900;cursor:pointer}.ctrl:disabled{opacity:.35;cursor:default}.screen{margin-top:10px;border:2px solid #302b23;background:#030303;color:var(--amber);font:900 12px/1.45 "Courier New",monospace;letter-spacing:.08em;min-height:54px;padding:10px;display:flex;align-items:center;justify-content:center;text-align:center}.drop{display:block;border:2px dashed #39342e;background:#0d0c0b;padding:28px;text-align:center;cursor:pointer;transition:.15s}.drop.drag{border-color:var(--amber);background:#1b180f}.drop .dropmark{font-size:42px;line-height:1;margin-bottom:14px;color:var(--amber)}.drop .big{font-weight:900;font-size:22px;letter-spacing:.02em}.drop .instruction{margin-top:10px;color:#d7d2c5;font-size:12px;font-weight:700;letter-spacing:.08em}.drop .or{margin:18px 0 10px;color:#666;font-size:10px;letter-spacing:.18em}.drop .choose{display:inline-block;background:var(--panel);color:var(--ink);padding:11px 16px;font-weight:900;font-size:12px}.drop .small{margin-top:16px;color:#888;font-size:11px;line-height:1.6}.progress{height:5px;background:#171614;margin-top:12px;overflow:hidden}.progress>div{height:100%;width:0;background:var(--amber);transition:.15s}.grid{margin-top:16px;border-top:1px solid #2a2723}.row{display:grid;grid-template-columns:1fr 70px 80px;border-bottom:1px solid #211f1c}.cell{padding:10px 8px;font-size:11px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.head .cell{color:#6d675f;font-weight:900;letter-spacing:.12em;font-size:9px}.row.active .cell{color:var(--amber)}.bpm,.state{text-align:right}.footer{display:flex;justify-content:space-between;gap:15px;align-items:flex-start;margin-top:18px;color:#6e685f;font-size:10px;line-height:1.5}.counter{font-weight:900;color:#aaa}.note{max-width:650px;text-align:right}@media(max-width:760px){body{padding:18px 12px}.machine{grid-template-columns:1fr}.logo{max-width:330px}.top{align-items:flex-start;flex-direction:column}.tag{text-align:left}.footer{flex-direction:column}.note{text-align:left}}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="top">
+    <div class="brand">SONO PLAY MINI</div>
+    <div class="tag">LOCAL FILES · LOCAL ANALYSIS · NO UPLOAD</div>
+  </div>
+  <div class="machine">
+    <div class="left">
+      <div class="logo" aria-label="SONO PLAY MINI">
+        <div class="tile">S</div><div class="tile">O</div><div class="tile">N</div><div class="tile">O</div>
+        <div class="tile play">P</div><div class="tile play">L</div><div class="tile play">A</div><div class="tile play">Y</div>
+        <div class="tile">M</div><div class="tile">I</div><div class="tile">N</div><div class="tile">I</div>
+        <div class="tile"></div><div class="tile"></div><div class="tile"></div><div class="tile"></div>
+      </div>
+      <div class="controls">
+        <button class="ctrl" id="playBtn" disabled>PLAY</button>
+        <button class="ctrl" id="nextBtn" disabled>NEXT</button>
+      </div>
+      <div class="screen" id="status">READY</div>
+    </div>
+    <div class="right">
+      <label class="drop" id="dropZone" for="folderInput">
+        <div class="dropmark">↓</div>
+        <div class="big">DROP YOUR MUSIC FOLDER HERE</div>
+        <div class="instruction">DRAG &amp; DROP A FOLDER OF AUDIO FILES INTO THIS AREA</div>
+        <div class="or">— OR —</div>
+        <div class="choose">CLICK HERE TO SELECT A MUSIC FOLDER</div>
+        <div class="small">Shift-click to select individual files.<br>MP3 · WAV · M4A · AAC · FLAC · OGG<br>Your music stays on your computer.</div>
+      </label>
+      <input id="folderInput" type="file" webkitdirectory multiple hidden>
+      <input id="fileInput" type="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.flac,.ogg" multiple hidden>
+      <div class="progress"><div id="scanProgress"></div></div>
+      <div class="grid" id="grid">
+        <div class="row head">
+          <div class="cell">Track</div><div class="cell bpm">BPM</div><div class="cell state">State</div>
+        </div>
+      </div>
+      <div class="footer">
+        <span class="counter" id="counter">0 TRACKS</span>
+        <span class="note">Best in Chrome / Edge on Windows. BPM detection is approximate and runs locally. Adaptive mixes are usually 2–5 seconds and can extend to 8 seconds when tempos fit closely.</span>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+(()=>{
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  const ctx = new AudioCtx();
+  const AUDIO_EXT = /\.(mp3|wav|m4a|aac|flac|ogg)$/i;
+  const folderInput = document.getElementById('folderInput');
+  const fileInput = document.getElementById('fileInput');
+  const dropZone = document.getElementById('dropZone');
+  const grid = document.getElementById('grid');
+  const counterEl = document.getElementById('counter');
+  const statusEl = document.getElementById('status');
+  const playBtn = document.getElementById('playBtn');
+  const nextBtn = document.getElementById('nextBtn');
+  const scanProgress = document.getElementById('scanProgress');
+  let tracks=[];
+  let currentIndex=-1;
+  let source=null;
+  let gain=null;
+  let playing=false;
+  let playStartedAt=0;
+  let playOffset=0;
+
+  function setStatus(s){ statusEl.textContent=s; }
+  function cleanName(name){ return name.replace(/\.[^.]+$/,'').replace(/[_-]+/g,' ').trim().toUpperCase(); }
+  function render(){
+    [...grid.querySelectorAll('.row:not(.head)')].forEach(n=>n.remove());
+    tracks.forEach((t,i)=>{
+      const row = document.createElement('div');
+      row.className = 'row' + (i===currentIndex?' active':'');
+      row.innerHTML = `<div class="cell">${escapeHtml(cleanName(t.file.name))}</div>
+        <div class="cell bpm">${t.bpm ? Math.round(t.bpm) : '—'}</div>
+        <div class="cell state">${i===currentIndex && playing ? 'PLAY' : (t.ready?'READY':'SCAN')}</div>`;
+      grid.appendChild(row);
+    });
+    counterEl.textContent = `${tracks.length} TRACK${tracks.length===1?'':'S'}`;
+    playBtn.disabled = !tracks.length;
+    nextBtn.disabled = !tracks.length;
+  }
+  function escapeHtml(s){ return s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+  async function decodeFile(file){ const ab = await file.arrayBuffer(); return await ctx.decodeAudioData(ab.slice(0)); }
+  function estimateBpm(buffer){
+    const sr = buffer.sampleRate, len = buffer.length, channels = buffer.numberOfChannels;
+    const maxSeconds = Math.min(buffer.duration,150), end = Math.min(len,Math.floor(maxSeconds*sr));
+    const hop=1024, energies=[];
+    for(let p=0;p<end;p+=hop){ let e=0; const stop=Math.min(p+hop,end); for(let i=p;i<stop;i+=8){ let s=0; for(let c=0;c<channels;c++) s+=buffer.getChannelData(c)[i]||0; s/=channels; e+=s*s; } energies.push(e); }
+    const diff=new Float32Array(energies.length); let mean=0;
+    for(let i=1;i<energies.length;i++){ diff[i]=Math.max(0,energies[i]-energies[i-1]); mean+=diff[i]; }
+    mean/=Math.max(1,diff.length-1); const peaks=[], threshold=mean*1.45;
+    for(let i=2;i<diff.length-2;i++) if(diff[i]>threshold&&diff[i]>diff[i-1]&&diff[i]>=diff[i+1]) peaks.push(i);
+    if(peaks.length<4) return 0;
+    const hist=new Map(), secPerHop=hop/sr;
+    for(let a=0;a<peaks.length;a++) for(let b=a+1;b<Math.min(a+10,peaks.length);b++){ const dt=(peaks[b]-peaks[a])*secPerHop; if(dt<=0) continue; let bpm=60/dt; while(bpm<70)bpm*=2; while(bpm>180)bpm/=2; const key=Math.round(bpm); hist.set(key,(hist.get(key)||0)+1); }
+    let best=0,score=0; for(const [b,s] of hist){ if(s>score){score=s;best=b;} } return best;
+  }
+  async function addFiles(fileList){
+    const files=[...fileList].filter(f=>f.type.startsWith('audio/')||AUDIO_EXT.test(f.name));
+    if(!files.length){setStatus('NO AUDIO FILE FOUND');return;}
+    const existing=new Set(tracks.map(t=>`${t.file.name}|${t.file.size}`));
+    const fresh=files.filter(f=>!existing.has(`${f.name}|${f.size}`));
+    if(!fresh.length)return;
+    const firstDropShouldBeNext=playing&&fresh.length>0;
+    const added=fresh.map(file=>({file,bpm:0,buffer:null,ready:false})); tracks.push(...added); render();
+    for(let i=0;i<added.length;i++){ const t=added[i]; setStatus(`SCANNING ${i+1}/${added.length} — ${cleanName(t.file.name)}`); scanProgress.style.width=`${Math.round((i/added.length)*100)}%`; try{t.buffer=await decodeFile(t.file);t.bpm=estimateBpm(t.buffer);t.ready=true;}catch(e){console.warn(e);t.ready=false;} scanProgress.style.width=`${Math.round(((i+1)/added.length)*100)}%`; render(); await new Promise(r=>setTimeout(r,0)); }
+    if(firstDropShouldBeNext){ const first=added[0]; const others=tracks.filter(t=>t!==first); others.sort((a,b)=>(a.bpm||999)-(b.bpm||999)); const insertAt=Math.min(currentIndex+1,others.length); others.splice(insertAt,0,first); tracks=others; }
+    else{ tracks.sort((a,b)=>{ if(!a.bpm&&!b.bpm)return 0;if(!a.bpm)return 1;if(!b.bpm)return-1;return a.bpm-b.bpm; }); if(currentIndex>=tracks.length)currentIndex=0; }
+    scanProgress.style.width='0%'; setStatus(`READY — ${tracks.length} TRACKS — LOW → HIGH BPM · ENJOY`); render();
+  }
+  let transitionTimer=null;
+  function clearTransitionTimer(){ if(transitionTimer){clearTimeout(transitionTimer);transitionTimer=null;} }
+  function mixDurationFor(a,b){
+    if(!a||!b||!a.buffer||!b.buffer)return .35;
+    if(a.buffer.duration<12||b.buffer.duration<8)return .35;
+    if(a.bpm&&b.bpm){const gap=Math.abs(a.bpm-b.bpm);if(gap<=2)return 8;if(gap<=5)return 5;if(gap<=10)return 4;return 3;}
+    return 3;
+  }
+  async function stopSource(){ clearTransitionTimer(); if(source){try{source.onended=null;source.stop();}catch(e){} try{source.disconnect();}catch(e){}} source=null; if(gain){try{gain.disconnect();}catch(e){}} gain=null; }
+  async function playIndex(idx,opts={}){
+    if(!tracks.length)return; idx=(idx+tracks.length)%tracks.length; const t=tracks[idx];
+    if(!t.buffer){setStatus(`DECODING — ${cleanName(t.file.name)}`);try{t.buffer=await decodeFile(t.file);t.ready=true;}catch(e){setStatus('CANNOT PLAY THIS FILE');return playIndex(idx+1,opts);}}
+    await ctx.resume(); clearTransitionTimer();
+    const previousSource=opts.keepPrevious?source:null, previousGain=opts.keepPrevious?gain:null;
+    if(!opts.keepPrevious)await stopSource();
+    currentIndex=idx; const newSource=ctx.createBufferSource(), newGain=ctx.createGain(); newSource.buffer=t.buffer; newSource.connect(newGain).connect(ctx.destination);
+    const now=ctx.currentTime, fadeIn=Math.max(.05,Number(opts.fadeIn)||.05); newGain.gain.setValueAtTime(0,now); newGain.gain.linearRampToValueAtTime(1,now+fadeIn); source=newSource; gain=newGain;
+    if(previousSource&&previousGain){const fadeOut=Math.max(.05,Number(opts.fadeOut)||fadeIn);try{previousGain.gain.cancelScheduledValues(now);previousGain.gain.setValueAtTime(Math.max(.0001,previousGain.gain.value),now);previousGain.gain.linearRampToValueAtTime(0,now+fadeOut);previousSource.stop(now+fadeOut+.03);}catch(e){}}
+    newSource.start(now); playing=true; playStartedAt=now; playOffset=0; playBtn.textContent='PAUSE'; setStatus(`NOW PLAYING — ${cleanName(t.file.name)}${t.bpm?' — '+Math.round(t.bpm)+' BPM':''}`); render();
+    if(tracks.length>1){const next=(idx+1)%tracks.length,mix=mixDurationFor(t,tracks[next]),lead=Math.min(mix,Math.max(.35,t.buffer.duration-.1)),delay=Math.max(.05,t.buffer.duration-lead);transitionTimer=setTimeout(()=>{if(!playing||currentIndex!==idx)return;playIndex(next,{keepPrevious:true,fadeIn:lead,fadeOut:lead});},delay*1000);}
+    newSource.onended=()=>{if(playing&&currentIndex===idx&&tracks.length>1)playIndex((idx+1)%tracks.length,{fadeIn:.05});};
+  }
+  async function pause(){ if(!playing)return; if(source){playOffset+=ctx.currentTime-playStartedAt;await stopSource();} playing=false;playBtn.textContent='PLAY';setStatus('PAUSED');render(); }
+  async function resumeCurrent(){
+    if(currentIndex<0)return playIndex(0); const t=tracks[currentIndex]; await ctx.resume(); await stopSource(); source=ctx.createBufferSource(); gain=ctx.createGain(); source.buffer=t.buffer; source.connect(gain).connect(ctx.destination); const safeOffset=Math.min(playOffset,Math.max(0,t.buffer.duration-.1)); gain.gain.setValueAtTime(0,ctx.currentTime);gain.gain.linearRampToValueAtTime(1,ctx.currentTime+.05);source.start(0,safeOffset);playStartedAt=ctx.currentTime-safeOffset;playing=true;playBtn.textContent='PAUSE';setStatus(`NOW PLAYING — ${cleanName(t.file.name)}${t.bpm?' — '+Math.round(t.bpm)+' BPM':''}`);render();
+    if(tracks.length>1){const next=(currentIndex+1)%tracks.length,mix=mixDurationFor(t,tracks[next]),remaining=Math.max(.1,t.buffer.duration-safeOffset),lead=Math.min(mix,Math.max(.35,remaining-.1));transitionTimer=setTimeout(()=>{if(!playing)return;playIndex(next,{keepPrevious:true,fadeIn:lead,fadeOut:lead});},Math.max(.05,remaining-lead)*1000);}
+  }
+  playBtn.addEventListener('click',()=>playing?pause():resumeCurrent());
+  nextBtn.addEventListener('click',()=>{playOffset=0;playIndex(currentIndex<0?0:(currentIndex+1)%tracks.length);});
+  folderInput.addEventListener('change',e=>addFiles(e.target.files)); fileInput.addEventListener('change',e=>addFiles(e.target.files));
+  dropZone.addEventListener('click',e=>{if(e.shiftKey){e.preventDefault();fileInput.click();}});
+  ['dragenter','dragover'].forEach(ev=>dropZone.addEventListener(ev,e=>{e.preventDefault();dropZone.classList.add('drag');}));
+  ['dragleave','drop'].forEach(ev=>dropZone.addEventListener(ev,e=>{e.preventDefault();dropZone.classList.remove('drag');}));
+  dropZone.addEventListener('drop',e=>addFiles(e.dataTransfer.files)); render();
+})();
+</script>
+</body>
+</html>

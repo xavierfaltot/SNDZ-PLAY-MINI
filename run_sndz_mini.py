@@ -103,11 +103,6 @@ def main() -> int:
     if logo_path.is_file():
         app.setWindowIcon(QIcon(str(logo_path)))
 
-    # Always use the built-in mark for the interface itself. This guarantees
-    # the SONO PLAY MINI logo is present in standalone builds on every Mac.
-    ui.ClickableLogo = BuiltInSonoLogo
-    ui.LOGO_PATH = Path("/__sono_play_mini_builtin_logo__")
-
     window = ui.SonoWindow()
     window.showFullScreen()
     return app.exec()

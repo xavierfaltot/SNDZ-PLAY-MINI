@@ -27,14 +27,12 @@ BPM_RANGE_MAX = 150
 MAX_ANALYSIS_SECONDS = 120
 INTRO_ANALYSIS_SECONDS = 32
 OUTRO_ANALYSIS_SECONDS = 32
-MIX_SECONDS = 8.0
-# Mix windows are scanned in 4-second steps starting at MIX_SECONDS (see
-# mixable_region_seconds_from_energies), so MAX_MIX_SECONDS must stay on
-# that 8, 12, 16, ... grid or the scan will silently undershoot it.
-MAX_MIX_SECONDS = 12.0
-MID_MIX_SECONDS = 10.0
-SHORT_LONG_MIX_SECONDS = 9.0
-MIN_MIX_DURATION_SECONDS = 24.0
+MIX_SECONDS = 2.0
+# Short, frequent transitions: scan every whole second from 2s up to 5s.
+MAX_MIX_SECONDS = 5.0
+MID_MIX_SECONDS = 4.0
+SHORT_LONG_MIX_SECONDS = 3.0
+MIN_MIX_DURATION_SECONDS = 12.0
 NO_TRANSITION_SECONDS = 0.0
 # When no real mix window is offered (short track, no clean outro/intro,
 # vocal-heavy region...), the player still starts the next track a fraction
@@ -420,7 +418,7 @@ def mixable_region_seconds_from_energies(
         return 0.0
     best = 0.0
     max_seconds = int(min(MAX_MIX_SECONDS, len(energies) * ENERGY_FRAME_SECONDS))
-    for seconds in range(int(MIX_SECONDS), max_seconds + 1, 4):
+    for seconds in range(int(MIX_SECONDS), max_seconds + 1):
         frame_count = max(12, int(seconds / ENERGY_FRAME_SECONDS))
         candidate = energies[:frame_count] if from_start else energies[-frame_count:]
         if not is_mixable_intro_from_energies(candidate):

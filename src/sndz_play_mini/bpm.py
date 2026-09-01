@@ -28,10 +28,12 @@ MAX_ANALYSIS_SECONDS = 120
 INTRO_ANALYSIS_SECONDS = 32
 OUTRO_ANALYSIS_SECONDS = 32
 MIX_SECONDS = 2.0
-# Short, frequent transitions: scan every whole second from 2s up to 5s.
-MAX_MIX_SECONDS = 5.0
-MID_MIX_SECONDS = 4.0
-SHORT_LONG_MIX_SECONDS = 3.0
+# Short, frequent transitions by default. When two tracks fit very closely,
+# the same scan may expose a longer clean window so the UI layer can let
+# that transition breathe for up to 8 seconds.
+MAX_MIX_SECONDS = 8.0
+MID_MIX_SECONDS = 5.0
+SHORT_LONG_MIX_SECONDS = 5.0
 MIN_MIX_DURATION_SECONDS = 12.0
 NO_TRANSITION_SECONDS = 0.0
 # When no real mix window is offered (short track, no clean outro/intro,
